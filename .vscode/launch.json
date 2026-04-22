@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "STM32 Debug (ST-Link)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "stlink",
+            "cwd": "${workspaceFolder}",
+            "executable": "${command:cmake.launchTargetPath}",
+            "device": "STM32F407VG", 
+            "interface": "swd",
+            "runToEntryPoint": "main",
+            "svdFile": "${workspaceFolder}/STM32F407.svd"
+        }
+    ]
+}

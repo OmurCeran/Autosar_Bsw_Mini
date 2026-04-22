@@ -1,0 +1,27 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/Core/Inc",
+                "${workspaceFolder}/Core/Inc/app",
+                "${workspaceFolder}/Core/Inc/bsw/com",
+                "${workspaceFolder}/Core/Inc/bsw/dem",
+                "${workspaceFolder}/Core/Inc/bsw/rte",
+                "${workspaceFolder}/Core/Inc/bsw/schm",
+                "${workspaceFolder}/Drivers/STM32F4xx_HAL_Driver/Inc",
+                "${workspaceFolder}/Middlewares/Third_Party/FreeRTOS/Source/include",
+                "${workspaceFolder}/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS",
+                "${workspaceFolder}/Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE"
+            ],
+            "configurationProvider": "ms-vscode.cmake-tools"
+        }
+    ],
+    "version": 4
+}
