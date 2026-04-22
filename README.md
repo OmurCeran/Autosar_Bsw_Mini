@@ -1,146 +1,103 @@
-# Mini AUTOSAR BSW Demo
+# 🏛️ ARCHITECTURE.md — Design Decisions and AUTOSAR Mapping
 
-A minimal implementation of AUTOSAR Classic BSW concepts on STM32F4 Discovery + FreeRTOS.
+This document explains **why** each module in the `Autosar_Bsw_Mini` project is designed the way it is, and **what it corresponds to in a real-world AUTOSAR Classic architecture**. 
 
-**This is NOT a real AUTOSAR stack.** It demonstrates the *mechanisms* and *architectural patterns* that AUTOSAR BSW modules use — implemented from scratch for learning and portfolio purposes.
+Use this document as a technical reference to understand the engineering trade-offs and mechanisms simulated in this project.
 
-## Why This Project?
+## 🎯 Overall Approach
 
-AUTOSAR Classic BSW is commercially licensed and cannot be used individually. This project implements the core *concepts* of key BSW modules to demonstrate architectural understanding:
+This project is **not** a 1:1 replica of a production-grade AUTOSAR Classic Basic Software (BSW) stack — it is a **conceptual simulation**. The primary goals are:
 
-- **How COM packs signals into I-PDUs** (bit-level packing/unpacking with endianness)
-- **How DEM manages diagnostic events** (debounce, DTC status byte per ISO 14229, freeze frame)
-- **How SchM dispatches MainFunctions** (periodic BSW scheduling, exclusive areas)
-- **How RTE provides data consistency** (implicit vs explicit data access patterns)
-- **Why race conditions occur in shared data** and how AUTOSAR solves them
+1. **Understand the Core Mechanisms:** Abstract the extreme complexity of AUTOSAR into readable, fundamental mechanisms (e.g., how RTE implicit communication actually prevents race conditions).
+2. **Demonstrate a Real Engineering Problem:** Implement a tangible, hardware-level problem (an EPS race condition causing torque miscalculation) with working, executable code.
+3. **Provide a Portfolio Reference:** Create a tangible, presentable project for technical interviews demonstrating architectural awareness.
+4. **Teach Through Comments:** The source code is documented not just to explain *"what"* a function does, but *"why"* it exists and *"what"* its real AUTOSAR equivalent is (e.g., `Rte_IRead` vs. `Rte_Read`).
 
-The project recreates a real EPS (Electric Power Steering) debug scenario end-to-end.
+---
 
-## Architecture
+## 🧩 Module-by-Module Design Notes
 
-```
-┌─────────────────────────────────────────┐
-│  Application Layer (SWC Simulation)     │
-│  - Torque calculation (1ms task)        │
-│  - Sensor reading (10ms task)           │
-│  - Diagnostic monitor (100ms task)      │
-├─────────────────────────────────────────┤
-│  Mini RTE (Data Access Layer)           │
-│  - Rte_IRead / Rte_IWrite (implicit)    │
-│  - Rte_Read / Rte_Write (explicit)      │
-│  - Task-begin snapshot / task-end flush │
-├──────────┬──────────┬───────────────────┤
-│ Mini COM │ Mini DEM │ Mini SchM         │
-│ Signal   │ Event    │ MainFunction      │
-│ packing  │ debounce │ dispatch          │
-│ I-PDU    │ Status   │ Exclusive area    │
-│ Tx/Rx    │ byte     │ (IRQ disable)     │
-├──────────┴──────────┴───────────────────┤
-│  HAL — UART Tx (DMA-based)              │
-├─────────────────────────────────────────┤
-│  FreeRTOS (in place of AUTOSAR OS)      │
-├─────────────────────────────────────────┤
-│  STM32F407VG Discovery — ARM Cortex-M4  │
-└─────────────────────────────────────────┘
-```
+### 1. Mini_Rte — The Most Important Module
 
-## Module Mapping to Real AUTOSAR
+**Why is this module the core of the project?**
+The core of the EPS debug story lives here. Both the root cause and the architectural solution of the race condition are implemented in this file.
 
-| This Project     | Real AUTOSAR         | What it demonstrates                    |
-|-----------------|----------------------|-----------------------------------------|
-| `Mini_Com`      | COM + PduR + CanIf   | Signal-to-PDU packing, byte order       |
-| `Mini_Dem`      | DEM + NvM (partial)  | Debounce, DTC status byte, freeze frame |
-| `Mini_SchM`     | SchM                 | MainFunction scheduling, exclusive area |
-| `Mini_Rte`      | RTE                  | Implicit vs explicit data access        |
-| `App_Swc`       | SWC (Runnable)       | Application logic in tasks              |
-| UART Tx (DMA)   | CAN Driver + CanIf   | Simulated bus output, non-blocking      |
-| RAM buffer      | NvM → Fee → Fls      | Simulated non-volatile storage          |
+**Two Supported Modes:**
+- **`RTE_ACCESS_EXPLICIT`:** Software Components (SWCs) read/write directly from/to the global buffer. Preemption during these reads/writes leads to data corruption (Race Condition).
+- **`RTE_ACCESS_IMPLICIT`:** A snapshot (local copy) of the data is taken at the start of the task (`Rte_Task_Begin`), and outputs are flushed at the end of the task (`Rte_Task_End`). The data remains strictly consistent throughout the task execution.
 
-## Race Condition Demo
+**In Real AUTOSAR:**
+- This choice is made at the port level in tools like DaVinci Configurator (via the `dataElement.isReentrant` attribute).
+- The RTE generator produces entirely different C macros based on this choice.
+- The mode is fixed at compile-time.
 
-The project includes a deliberate race condition demonstration:
+**In This Demo:**
+- The mode can be switched dynamically (purely for educational visibility).
+- An inconsistency counter proves the race condition physically happens. Explicit mode shows continuous errors, while implicit mode completely eliminates them.
 
-1. **Explicit mode**: 10ms task writes a struct member-by-member, 1ms task preempts and reads inconsistent data → wrong torque calculation
-2. **Implicit mode**: RTE snapshots data at task start, guaranteeing consistency → correct calculation
+---
 
-An inconsistency counter quantifies the difference. In typical runs:
-- Explicit mode: dozens of inconsistencies over 5 seconds
-- Implicit mode: zero inconsistencies
+### 2. Mini_SchM — Exclusive Areas
 
-This mirrors a real EPS debug scenario I encountered on a production project.
+**Critical Design Rule:** Exclusive area duration must be **MINIMAL**.
 
-## DMA-Based UART Output
+You will see this constraint documented in the code:
+> *"Keep the code between Enter and Exit as SHORT as possible. Long exclusive areas cause timing violations in safety-critical systems."*
 
-Demo output is streamed over USART2 using **DMA** rather than blocking or interrupt-driven transmission. This matches safety-critical system design practice:
+This constraint comes directly from real EPS (Electric Power Steering) safety requirements. Disabling interrupts for too long causes the 1ms safety task to miss its deadline, triggering WdgM (Watchdog Manager) deadline monitoring, which ultimately forces the MCU into a safe state (Reset).
 
-- The 1ms task does **not** block waiting for UART
-- CPU is free to run torque calculations while DMA ships bytes in the background
-- No priority inversion through the UART driver
-- Transmission completion is signaled via DMA TC interrupt
+**Interview FAQ:** *"Why didn't you use a FreeRTOS mutex to protect the data?"*
+**Answer:** AUTOSAR OS does not typically use task-level blocking mutexes for BSW data protection. Shared BSW data is protected via SchM Exclusive Areas (which map to hardware interrupt disabling) or OS Resources (Priority Ceiling Protocol). For extremely short critical sections (e.g., copying 4 bytes), exclusive areas are deterministic and much faster, as they avoid RTOS context switch overhead.
 
-This is how a real production AUTOSAR system would handle trace/diagnostic output — minimizing impact on safety-critical timing.
+---
 
-## Build & Debug Workflow
+### 3. Mini_Com — Signal Packing & Endianness
 
-### Prerequisites
-- `arm-none-eabi-gcc` toolchain
-- `cmake` (3.20+)
-- ST-Link v2 (on-board on the Discovery board)
-- VS Code with the **Cortex-Debug** extension
-- `st-util` or `stlink-tools` (for direct ST-Link access — no OpenOCD required)
+**Focus:** Bit-level payload packing and endianness handling.
 
-### Build
-```bash
-mkdir build && cd build
-cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/arm-none-eabi.cmake ..
-make -j$(nproc)
-```
+Motorola (Big-Endian) byte order is the standard in automotive CAN networks. The code supports both Big-Endian and Little-Endian byte ordering, selectable via the configuration table.
 
-### Debug (VS Code + Cortex-Debug)
+**Simplifications Made for the Demo:**
+- Only 16-bit byte-aligned signals are implemented (Real COM supports arbitrary bit-lengths across byte boundaries).
+- The `PduR` (PDU Router) and `CanIf` (CAN Interface) modules are abstracted and simulated directly inside COM.
+- Transmission mode is limited to `Periodic` (Real COM supports Direct, Mixed, and None).
 
-Open the project in VS Code and press **F5**. Cortex-Debug handles everything:
-- Starts `st-util` (GDB server) automatically
-- Flashes the `.elf` to the board
-- Stops at `main()`
-- Provides SWV/ITM console for printf-style output
+**Key Concepts Demonstrated:**
+- Signal-to-PDU mapping (`startBit`, `bitLength`, `endianness`).
+- MainFunction-triggered transmission (A PDU is sent synchronously on the 10ms cycle, not instantly when a SWC writes a signal).
 
-**No OpenOCD is used in this project.** The Cortex-Debug extension talks directly to the ST-Link probe via `st-util`. This keeps the toolchain lean and avoids the configuration complexity of OpenOCD's config files.
+---
 
-### Flash Only (no debug)
-```bash
-st-flash write build/mini_autosar_bsw.bin 0x08000000
-```
+### 4. Mini_Dem — Debounce and DTC Status
 
-## Hardware
-- STM32F407VG Discovery Board (on-board ST-Link v2)
-- USB-UART adapter or terminal connected to PA2 (USART2 TX) — for DMA output
-- No additional hardware required
+**Counter-Based Debounce Algorithm:**
+- `PREFAILED` report: counter += `step_up`
+- `PREPASSED` report: counter -= `step_down`
+- When the counter reaches `threshold_failed` ➔ **FAILED** status transition.
+- When the counter drops to `threshold_passed` ➔ **PASSED** status transition.
 
-## Project Layout
+**ISO 14229 DTC Status Byte (8-bit):**
+The module simulates the standard UDS status byte. Each bit has a distinct meaning:
+- `Bit 0 (TF)`: **TestFailed** — The fault is currently active.
+- `Bit 3 (CDTC)`: **ConfirmedDTC** — The fault has matured and is stored in non-volatile memory.
+- `Bit 7 (WIR)`: **WarningIndicatorRequested** — Turn on the dashboard MIL (Malfunction Indicator Lamp).
 
-```
-mini-autosar-bsw/
-├── README.md / ARCHITECTURE.md / SETUP.md
-├── CMakeLists.txt
-├── cmake/arm-none-eabi.cmake
-├── .vscode/                     ← Cortex-Debug launch config
-├── include/
-│   ├── Std_Types.h              ← AUTOSAR std types
-│   ├── app/App_Swc.h
-│   └── bsw/
-│       ├── com/Mini_Com.h
-│       ├── dem/Mini_Dem.h
-│       ├── rte/Mini_Rte.h       ← Key file: implicit/explicit access
-│       └── schm/Mini_SchM.h
-└── src/
-    ├── main.c                   ← FreeRTOS task creation
-    ├── app/App_Swc.c            ← EPS runnables + race condition setup
-    └── bsw/
-        ├── com/Mini_Com.c       ← Bit-level signal packing
-        ├── dem/Mini_Dem.c       ← Debounce, DTC status, freeze frame
-        ├── rte/Mini_Rte.c       ← Core of the demo
-        └── schm/Mini_SchM.c     ← Exclusive area + MainFunction dispatch
-```
+**Freeze Frame & NvM Interaction:**
+- `Dem_SetEventStatus()` is a synchronous call that returns immediately.
+- In the `Dem_MainFunction`, the `isStored` flag triggers an asynchronous `NvM_WriteBlock()` request.
+- This demonstrates the standard AUTOSAR delayed-write pattern, preventing the CPU from stalling during Flash/EEPROM write cycles.
 
-## License
-MIT — Educational use. Not affiliated with AUTOSAR consortium or any vehicle manufacturer.
+---
+
+### 5. App_Swc — Runnable Simulation & Hardware Latency
+
+**Three Runnables Mapped to Three RTOS Tasks:**
+- **`1ms Task` (High Priority):** Torque Calculation (Safety-Critical, ASIL-D).
+- **`10ms Task` (Medium Priority):** Sensor Update (The victim/source of the race condition).
+- **`100ms Task` (Low Priority):** Diagnostic Monitor (Plausibility checks).
+
+**The Intentional Preemption Window:**
+```c
+/* === PREEMPTION WINDOW === */
+volatile uint32 delay;
+for (delay = 0; delay < 100; delay++) { /* Simulate hardware read time */ }
