@@ -6,6 +6,8 @@
 #include "Mini_SchM.h"
 #include "Mini_Com.h"
 #include "Mini_Dem.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 /* In real AUTOSAR: SchM uses OS API (SuspendAllInterrupts / ResumeAllInterrupts)
  * Here we use FreeRTOS critical section macros.
@@ -20,20 +22,21 @@ void SchM_Init(void)
 }
 
 /**
- * @brief Enter exclusive area — disable interrupts
+ * @brief Enter exclusive area — disable interrupts (nesting-safe)
  *
- * In real AUTOSAR: SchM_Enter_Com_COM_EXCLUSIVE_AREA_0()
- * Supports nesting: first call disables, subsequent calls increment counter.
+ * In real AUTOSAR: SchM_Enter_<Module>_<EA>()
+ * Maps to FreeRTOS taskENTER_CRITICAL() which:
+ *   - Saves current BASEPRI
+ *   - Raises BASEPRI to configMAX_SYSCALL_INTERRUPT_PRIORITY
+ *   - Manages nesting internally (no manual counter needed)
  *
  * CRITICAL: Keep the code between Enter and Exit as SHORT as possible.
- * Long exclusive areas cause timing violations in safety-critical systems.
- * In EPS: max exclusive area duration ~ 5-10 microseconds.
+ * In EPS: max exclusive area duration ~ 5–10 microseconds.
+ * Long exclusive areas → 1ms task misses deadline → WdgM reaction.
  */
 void SchM_Enter_ExclusiveArea(void)
 {
-    /* TODO: Replace with taskENTER_CRITICAL() from FreeRTOS */
-    __asm volatile ("cpsid i" ::: "memory");
-    schm_nestingCounter++;
+    taskENTER_CRITICAL();
 }
 
 /**
@@ -41,12 +44,7 @@ void SchM_Enter_ExclusiveArea(void)
  */
 void SchM_Exit_ExclusiveArea(void)
 {
-    schm_nestingCounter--;
-    if (schm_nestingCounter == 0U)
-    {
-        /* TODO: Replace with taskEXIT_CRITICAL() from FreeRTOS */
-        __asm volatile ("cpsie i" ::: "memory");
-    }
+    taskEXIT_CRITICAL();
 }
 
 /**
