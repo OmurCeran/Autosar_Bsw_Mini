@@ -111,32 +111,5 @@ motor_cmd = torque_input * calib_coeff * (100.0f / vehicle_speed);
 
 Low speed → high assist (parking maneuvers); high speed → low assist (highway). When a race condition causes the wrong `vehicle_speed` to be read, the assist level is miscalculated — this is the exact mechanism behind the "momentary steering heaviness" that the driver feels in a real EPS fault.
 
-## Lessons Reflected in the Design
-
-Things this project is deliberately careful about:
-
-1. **Minimize global state** — variables are module-local `static` whenever possible
-2. **Use const configuration tables** — mirrors real AUTOSAR generator output: data is constant, code is generic
-3. **Use exclusive areas deliberately** — not everywhere, only where real shared-data access needs protection
-4. **Mark TODOs clearly** — every place awaiting FreeRTOS integration is flagged
 5. **Teach through comments** — not just "what it does" but "why" and "what the real AUTOSAR equivalent is"
 
-## How to Present This Project in an Interview
-
-Use this structure when walking through the project:
-
-**Opening (30 seconds):**
-"I wanted to deepen my understanding of the internal mechanisms of AUTOSAR Classic BSW. Since commercial stacks aren't available individually, I implemented conceptual versions of the core modules on STM32F4 + FreeRTOS."
-
-**Demo (1 minute):**
-"It includes a working demonstration of the race condition I encountered in my EPS project. The demo switches between explicit and implicit data access modes and uses an inconsistency counter to show the difference clearly."
-
-**Depth (2 minutes):**
-"COM performs bit-level signal packing, DEM manages debounce counters and DTC status bytes, SchM provides exclusive areas, and RTE implements the task-boundary snapshot mechanism. Each module is documented with its real AUTOSAR counterpart in the README."
-
-**Prepare for follow-ups:**
-- *"Why not Zephyr?"* → FreeRTOS is conceptually closer to AUTOSAR OS (priority-based preemptive scheduling, no POSIX abstraction)
-- *"How did you test it?"* → The race condition counter measures the difference between explicit and implicit modes quantitatively
-- *"What's different from real AUTOSAR?"* → MCAL, PduR, EcuM, BswM, NvM, Fee, Fls are missing; only the core mechanisms are shown
-
-This project sends a stronger signal than "I studied AUTOSAR" — it says **"I understood it, I implemented it, and I know the nuances that matter."**
