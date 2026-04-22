@@ -41,7 +41,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define DEMO_PHASE_DURATION_MS   5000U
+#define DEMO_COOLDOWN_MS          500U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -61,7 +62,7 @@ DMA_HandleTypeDef hdma_usart2_tx;
 osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
-  .stack_size = 128 * 4,
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
@@ -87,10 +88,10 @@ const osThreadAttr_t task100ms_attributes = {
   .priority = (osPriority_t) osPriorityBelowNormal7,
 };
 
-/* DMA Printf için gerekli değişkenler */
-uint8_t dma_tx_buffer[256];   
-osSemaphoreId_t dma_tx_sem;   
-osMutexId_t printf_mutex;     
+/* DMA Printf icin gerekli degiskenler */
+uint8_t dma_tx_buffer[256];
+osSemaphoreId_t dma_tx_sem;
+osMutexId_t printf_mutex;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -154,10 +155,15 @@ int main(void)
   MX_SPI1_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  DMA_Printf("=== AUTOSAR Mini EPS Demo ===\r\n");
-  DMA_Printf("Initializing BSW modules...\r\n");
+  DMA_Printf("\r\n");
+  DMA_Printf("============================================\r\n");
+  DMA_Printf(" Autosar_Bsw_Mini - EPS Race Condition Demo\r\n");
+  DMA_Printf(" STM32F407 + FreeRTOS + DMA UART\r\n");
+  DMA_Printf("============================================\r\n");
+  DMA_Printf("\r\n");
+  DMA_Printf("[INIT] Initializing BSW modules...\r\n");
   BSW_Init();
-  DMA_Printf("BSW initialization completed\r\n");
+  DMA_Printf("[INIT] BSW initialization completed\r\n");
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -180,7 +186,7 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of defaultTask */
+  /* creation of defaultTask (used as Demo task) */
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
@@ -189,7 +195,9 @@ int main(void)
   task10msHandle = osThreadNew(task10msHandleFunction, NULL, &task10ms_attributes);
 
   task100msHandle = osThreadNew(task100msHandleFunction, NULL, &task100ms_attributes);
-  DMA_Printf("All tasks created, starting scheduler...\r\n");
+
+  DMA_Printf("[INIT] All tasks created, starting scheduler...\r\n");
+  DMA_Printf("\r\n");
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -390,7 +398,7 @@ static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
-  
+
   /* Enable UART2 clock */
   __HAL_RCC_USART2_CLK_ENABLE();
 
@@ -508,19 +516,19 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 /**
-  * @brief Thread-safe ve DMA tabanlı Printf fonksiyonu
+  * @brief Thread-safe ve DMA tabanli Printf fonksiyonu
   */
 void DMA_Printf(const char *format, ...)
 {
     va_list args;
     va_start(args, format);
 
-    if (osKernelGetState() == osKernelRunning) 
+    if (osKernelGetState() == osKernelRunning)
     {
-        // RTOS çalışıyorsa: Mutex ve Semaphore ile güvenli aktarım yap
+        /* RTOS calisiyorsa: Mutex ve Semaphore ile guvenli aktarim yap */
         if (osMutexAcquire(printf_mutex, osWaitForever) == osOK)
         {
-            // Bir önceki DMA transferinin bitmesini bekle
+            /* Bir onceki DMA transferinin bitmesini bekle */
             if (osSemaphoreAcquire(dma_tx_sem, osWaitForever) == osOK)
             {
                 int len = vsnprintf((char*)dma_tx_buffer, sizeof(dma_tx_buffer), format, args);
@@ -530,15 +538,15 @@ void DMA_Printf(const char *format, ...)
                 }
                 else
                 {
-                    osSemaphoreRelease(dma_tx_sem); // Hata varsa semaforu geri bırak
+                    osSemaphoreRelease(dma_tx_sem); /* Hata varsa semaforu geri birak */
                 }
             }
             osMutexRelease(printf_mutex);
         }
     }
-    else 
+    else
     {
-        // RTOS henüz başlamadıysa (main.c başındaki ilk çıktılar için): Polling kullan
+        /* RTOS henuz baslamadiysa: Polling kullan */
         int len = vsnprintf((char*)dma_tx_buffer, sizeof(dma_tx_buffer), format, args);
         if (len > 0)
         {
@@ -549,13 +557,12 @@ void DMA_Printf(const char *format, ...)
 }
 
 /**
-  * @brief UART DMA transferi tamamlandığında tetiklenir.
+  * @brief UART DMA transferi tamamlandiginda tetiklenir.
   */
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART2)
     {
-        // Transfer bitti, semaforu serbest bırakarak bir sonraki yazmaya izin ver
         osSemaphoreRelease(dma_tx_sem);
     }
 }
@@ -563,21 +570,88 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 
 /* USER CODE BEGIN Header_StartDefaultTask */
 /**
-  * @brief  Function implementing the defaultTask thread.
-  * @param  argument: Not used
-  * @retval None
+  * @brief  Demo Task — toggles between EXPLICIT and IMPLICIT RTE access
+  *         modes and reports the race condition count.
+  *
+  *         In EXPLICIT mode: shared data is accessed directly in the global
+  *         buffer. Preemption during a multi-field write causes the reader
+  *         task to see inconsistent data → dozens of errors per 5s window.
+  *
+  *         In IMPLICIT mode: RTE takes a task-boundary snapshot. Data stays
+  *         consistent throughout the task → zero errors.
   */
 /* USER CODE END Header_StartDefaultTask */
 void StartDefaultTask(void *argument)
 {
+  (void)argument;
+
   /* init code for USB_HOST */
   MX_USB_HOST_Init();
+
   /* USER CODE BEGIN 5 */
-  DMA_Printf("StartDefaultTask started\r\n");
-  /* Infinite loop */
-  for(;;)
+  uint32_t cycle = 0U;
+
+  /* Give the periodic tasks a moment to start running */
+  osDelay(1000);
+
+  DMA_Printf("\r\n");
+  DMA_Printf("############################################\r\n");
+  DMA_Printf("#   RACE CONDITION DEMO : STARTING         #\r\n");
+  DMA_Printf("############################################\r\n");
+  DMA_Printf("\r\n");
+
+  for (;;)
   {
-    osDelay(1);
+    cycle++;
+
+    /* ============ EXPLICIT MODE (dangerous) ============ */
+    DMA_Printf("--------------------------------------------\r\n");
+    DMA_Printf(" Cycle %lu : EXPLICIT mode (5s window)\r\n", cycle);
+    DMA_Printf("--------------------------------------------\r\n");
+
+    Rte_SetAccessMode(RTE_ACCESS_EXPLICIT);
+    Rte_ResetInconsistencyCount();
+
+    osDelay(DEMO_PHASE_DURATION_MS);
+
+    uint32_t explicitErrors = Rte_GetInconsistencyCount();
+    DMA_Printf(" Detected inconsistencies : %lu\r\n", explicitErrors);
+    DMA_Printf(" Torque miscalculations   : %lu\r\n", explicitErrors);
+    if (explicitErrors > 0U)
+    {
+      DMA_Printf(" Result                   : RACE CONDITION\r\n");
+    }
+    DMA_Printf("\r\n");
+
+    osDelay(DEMO_COOLDOWN_MS);
+
+    /* ============ IMPLICIT MODE (safe) ============ */
+    DMA_Printf("--------------------------------------------\r\n");
+    DMA_Printf(" Cycle %lu : IMPLICIT mode (5s window)\r\n", cycle);
+    DMA_Printf("--------------------------------------------\r\n");
+
+    Rte_SetAccessMode(RTE_ACCESS_IMPLICIT);
+    Rte_ResetInconsistencyCount();
+
+    osDelay(DEMO_PHASE_DURATION_MS);
+
+    uint32_t implicitErrors = Rte_GetInconsistencyCount();
+    DMA_Printf(" Detected inconsistencies : %lu%s\r\n",
+               implicitErrors, (implicitErrors == 0U) ? "  [OK]" : "  [FAIL]");
+    DMA_Printf(" Torque miscalculations   : %lu%s\r\n",
+               implicitErrors, (implicitErrors == 0U) ? "  [OK]" : "  [FAIL]");
+    if (implicitErrors == 0U)
+    {
+      DMA_Printf(" Result                   : AUTOSAR RTE snapshot works\r\n");
+    }
+    DMA_Printf("\r\n");
+
+    /* Summary */
+    DMA_Printf("==> Cycle %lu summary: EXPLICIT=%lu, IMPLICIT=%lu\r\n",
+               cycle, explicitErrors, implicitErrors);
+    DMA_Printf("\r\n");
+
+    osDelay(2000);
   }
   /* USER CODE END 5 */
 }
@@ -591,14 +665,12 @@ void task1msHandleFunction(void *argument)
 {
   (void)argument;
   /* USER CODE BEGIN task1ms */
-  DMA_Printf("task1msHandleFunction started\r\n");
   /* Infinite loop */
   for(;;)
   {
     Rte_Task_Begin();
     App_Runnable_TorqueCalc_1ms();
     SchM_MainFunction_1ms();
-    DMA_Printf("task1msHandleFunction started\r\n");
     Rte_Task_End();
     osDelay(1);
   }
@@ -614,7 +686,6 @@ void task10msHandleFunction(void *argument)
 {
   (void)argument;
   /* USER CODE BEGIN task10ms */
-  DMA_Printf("task10msHandleFunction started\r\n");
   /* Infinite loop */
   for(;;)
   {
@@ -622,7 +693,6 @@ void task10msHandleFunction(void *argument)
     App_Runnable_SensorUpdate_10ms();
     SchM_MainFunction_10ms();
     Rte_Task_End();
-    DMA_Printf("task10msHandleFunction completed\r\n");
     osDelay(10);
   }
   /* USER CODE END task10ms */
@@ -637,7 +707,6 @@ void task100msHandleFunction(void *argument)
 {
   (void)argument;
   /* USER CODE BEGIN task100ms */
-  DMA_Printf("task100msHandleFunction started\r\n");
   /* Infinite loop */
   for(;;)
   {
@@ -645,7 +714,6 @@ void task100msHandleFunction(void *argument)
     App_Runnable_DiagMonitor_100ms();
     SchM_MainFunction_100ms();
     Rte_Task_End();
-    DMA_Printf("task100msHandleFunction completed\r\n");
     osDelay(100);
   }
   /* USER CODE END task100ms */

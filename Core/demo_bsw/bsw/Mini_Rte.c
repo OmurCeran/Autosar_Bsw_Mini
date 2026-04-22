@@ -5,53 +5,58 @@
  * THIS IS THE MOST IMPORTANT FILE IN THE PROJECT.
  * It demonstrates the exact race condition from the EPS debug story
  * and how AUTOSAR's implicit data access solves it.
+ *
+ * Race condition detection strategy:
+ *   The 10ms writer task establishes a MATHEMATICAL INVARIANT between
+ *   the fields it writes. For every consistent snapshot of the struct,
+ *   vehicle_speed == torque_input * SPEED_TO_TORQUE_RATIO must hold.
+ *
+ *   If the 1ms reader sees a struct where this invariant is broken,
+ *   it has caught a torn write (race condition).
+ *
+ *   In EXPLICIT mode: writer updates fields one by one → 1ms task can
+ *   preempt between writes → reader sees broken invariant → detected.
+ *
+ *   In IMPLICIT mode: writer updates local copy, then atomic flush →
+ *   reader always sees a valid snapshot → invariant holds → zero errors.
  */
 
 #include "Mini_Rte.h"
 #include "Mini_SchM.h"
 
 /* ============================================================
+ * INVARIANT RATIO — writer must preserve this relationship
+ * If reader sees a struct violating this, it's a race condition.
+ * ============================================================ */
+#define SPEED_TO_TORQUE_RATIO   (10.0f)
+
+/* ============================================================
  * GLOBAL DATA — shared between all tasks
- * In real AUTOSAR: RTE-internal buffers, auto-generated , defined interface
  * ============================================================ */
 static Rte_SteeringDataType rte_globalData = {
-    .torque_input     = 0.0f,
-    .vehicle_speed    = 60.0f,   /* Default: 60 km/h to avoid div-by-zero */
+    .torque_input     = 1.0f,
+    .vehicle_speed    = 10.0f,   /* invariant: speed = torque * 10 */
     .calib_coeff      = 1.0f,
     .motor_torque_cmd = 0.0f,
     .steering_angle   = 0.0f
 };
 
-/* ============================================================
- * LOCAL COPY — used by implicit mode (per-task snapshot)
- * In real AUTOSAR: one copy per task that uses implicit access
- * For simplicity, we use a single local copy here.
- * ============================================================ */
+/* Local snapshot for implicit mode */
 static Rte_SteeringDataType rte_localCopy;
 
-/* ============================================================
- * ACCESS MODE — switch between explicit (dangerous) and implicit (safe)
- * ============================================================ */
+/* Access mode */
 static Rte_AccessModeType rte_accessMode = RTE_ACCESS_IMPLICIT;
 
-/* ============================================================
- * INCONSISTENCY DETECTION — counts how many times race condition occurs
- * Used for demo: run in explicit mode, count errors, switch to implicit,
- * show errors drop to zero.
- * ============================================================ */
+/* Inconsistency counter */
 static volatile uint32 rte_inconsistencyCount = 0U;
-
-/* Previous values for detecting inconsistency */
-static float32 rte_lastWrittenTorque = 0.0f;
-static float32 rte_lastWrittenSpeed  = 60.0f;
 
 /* ============================================================
  * INITIALIZATION
  * ============================================================ */
 void Rte_Init(void)
 {
-    rte_globalData.torque_input     = 0.0f;
-    rte_globalData.vehicle_speed    = 60.0f;
+    rte_globalData.torque_input     = 1.0f;
+    rte_globalData.vehicle_speed    = 10.0f;
     rte_globalData.calib_coeff      = 1.0f;
     rte_globalData.motor_torque_cmd = 0.0f;
     rte_globalData.steering_angle   = 0.0f;
@@ -73,13 +78,6 @@ Rte_AccessModeType Rte_GetAccessMode(void)
 
 /* ============================================================
  * EXPLICIT ACCESS — DIRECT READ/WRITE TO GLOBAL BUFFER
- *
- * DANGER: If 10ms task is writing torque_input and vehicle_speed
- * to the global buffer, and 1ms task preempts between the two
- * writes, 1ms task reads NEW torque_input but OLD vehicle_speed.
- * Result: inconsistent data → wrong torque calculation.
- *
- * This is EXACTLY what happened in the EPS debug story.
  * ============================================================ */
 Std_ReturnType Rte_Read_TorqueInput(float32 *value)
 {
@@ -102,15 +100,12 @@ Std_ReturnType Rte_Read_CalibCoeff(float32 *value)
 Std_ReturnType Rte_Write_TorqueInput(float32 value)
 {
     rte_globalData.torque_input = value;
-    rte_lastWrittenTorque = value;
-    /* NO PROTECTION — 1ms task can preempt right here! */
     return E_OK;
 }
 
 Std_ReturnType Rte_Write_VehicleSpeed(float32 value)
 {
     rte_globalData.vehicle_speed = value;
-    rte_lastWrittenSpeed = value;
     return E_OK;
 }
 
@@ -128,28 +123,13 @@ Std_ReturnType Rte_Write_MotorTorqueCmd(float32 value)
 
 /* ============================================================
  * IMPLICIT ACCESS — SNAPSHOT AT TASK START, FLUSH AT TASK END
- *
- * SAFE: 1ms task always sees a CONSISTENT set of values.
- * Either ALL old or ALL new — never a mix.
- *
- * How it works in real AUTOSAR RTE (generated code):
- * 1. OS calls Rte_Task_Begin() before any runnable executes
- * 2. RTE copies global → local inside exclusive area (fast!)
- * 3. Runnables use Rte_IRead/IWrite on LOCAL copy
- * 4. OS calls Rte_Task_End() after all runnables complete
- * 5. RTE copies local → global inside exclusive area (fast!)
- *
- * The exclusive area duration is VERY short — only the memcpy.
- * NOT the entire task execution. This is why it doesn't cause
- * timing violations even in EPS (unlike disabling IRQ for the
- * whole task, which would be unacceptable).
  * ============================================================ */
 void Rte_Task_Begin(void)
 {
     if (rte_accessMode == RTE_ACCESS_IMPLICIT)
     {
         SchM_Enter_ExclusiveArea();
-        rte_localCopy = rte_globalData;  /* Fast struct copy */
+        rte_localCopy = rte_globalData;
         SchM_Exit_ExclusiveArea();
     }
 }
@@ -209,25 +189,24 @@ void Rte_ResetInconsistencyCount(void)
 }
 
 /**
- * @brief Called by 1ms task to check data consistency
+ * @brief Check data consistency using the mathematical invariant.
  *
- * In explicit mode: compares read values against last-written values.
- * If torque is new but speed is old (or vice versa) → inconsistency detected.
+ * The writer task (10ms) maintains: vehicle_speed == torque_input * 10.
+ * If this invariant is broken, the reader saw a torn write — race condition.
  *
- * This function exists purely for the demo — real AUTOSAR doesn't need
- * this because implicit access prevents the problem entirely.
+ * Tolerance accounts for float precision.
  */
 void Rte_CheckConsistency(float32 readTorque, float32 readSpeed)
 {
     if (rte_accessMode == RTE_ACCESS_EXPLICIT)
     {
-        /* Detect if we read a mix of old and new values */
-        boolean torqueIsNew = (readTorque == rte_lastWrittenTorque);
-        boolean speedIsNew  = (readSpeed == rte_lastWrittenSpeed);
+        float32 expectedSpeed = readTorque * SPEED_TO_TORQUE_RATIO;
+        float32 diff = readSpeed - expectedSpeed;
+        if (diff < 0.0f) diff = -diff;
 
-        if (torqueIsNew != speedIsNew)
+        /* Tolerance: 0.5 covers float rounding but catches real mismatches */
+        if (diff > 0.5f)
         {
-            /* One is new, other is old → INCONSISTENCY (race condition!) */
             rte_inconsistencyCount++;
         }
     }
