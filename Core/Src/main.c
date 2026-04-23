@@ -42,6 +42,7 @@
 
 /* Private typedef -----------------------------------------------------------*/
 typedef StaticTask_t osStaticThreadDef_t;
+typedef StaticQueue_t osStaticMessageQDef_t;
 /* USER CODE BEGIN PTD */
 
 /* USER CODE END PTD */
@@ -124,6 +125,29 @@ const osThreadAttr_t task100ms_attributes = {
   .stack_size = sizeof(task100msStack),
   .priority = (osPriority_t) osPriorityAboveNormal,
 };
+/* Definitions for DiagnosticTask */
+osThreadId_t DiagnosticTaskHandle;
+uint32_t diagnosticTaskHBuffer[ 256 ];
+osStaticThreadDef_t diagnosticTaskHControlBlock;
+const osThreadAttr_t DiagnosticTask_attributes = {
+  .name = "DiagnosticTask",
+  .cb_mem = &diagnosticTaskHControlBlock,
+  .cb_size = sizeof(diagnosticTaskHControlBlock),
+  .stack_mem = &diagnosticTaskHBuffer[0],
+  .stack_size = sizeof(diagnosticTaskHBuffer),
+  .priority = (osPriority_t) osPriorityNormal4,
+};
+/* Definitions for DcMuartRxQueue */
+osMessageQueueId_t DcMuartRxQueueHandle;
+uint8_t DcMuartRxQueueBuffer[ 128 * sizeof( uint8_t ) ];
+osStaticMessageQDef_t DcMuartRxQueueControlBlock;
+const osMessageQueueAttr_t DcMuartRxQueue_attributes = {
+  .name = "DcMuartRxQueue",
+  .cb_mem = &DcMuartRxQueueControlBlock,
+  .cb_size = sizeof(DcMuartRxQueueControlBlock),
+  .mq_mem = &DcMuartRxQueueBuffer,
+  .mq_size = sizeof(DcMuartRxQueueBuffer)
+};
 /* USER CODE BEGIN PV */
 
 /*Static semaphore and mutex usage*/
@@ -164,6 +188,7 @@ void StartDefaultTask(void *argument);
 void task1msHandleFunction(void *argument);
 void task10msHandleFunction(void *argument);
 void task100msHandleFunction(void *argument);
+void DiagnosticTask_Function(void *argument);
 
 /* USER CODE BEGIN PFP */
 void DMA_Printf(const char *format, ...);
@@ -233,6 +258,10 @@ int main(void)
   /* start timers, add new ones, ... */
   /* USER CODE END RTOS_TIMERS */
 
+  /* Create the queue(s) */
+  /* creation of DcMuartRxQueue */
+  DcMuartRxQueueHandle = osMessageQueueNew (128, sizeof(uint8_t), &DcMuartRxQueue_attributes);
+
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
@@ -249,6 +278,9 @@ int main(void)
 
   /* creation of task100ms */
   task100msHandle = osThreadNew(task100msHandleFunction, NULL, &task100ms_attributes);
+
+  /* creation of DiagnosticTask */
+  DiagnosticTaskHandle = osThreadNew(DiagnosticTask_Function, NULL, &DiagnosticTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
 
@@ -665,7 +697,8 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
                 newDataLen = Size - uart_rx_old_pos;
                 for (uint16_t i = 0U; i < newDataLen; i++)
                 {
-                    Dcm_FeedRxByte(uart_rx_buffer[uart_rx_old_pos + i]);
+                    uint8_t rxByte = uart_rx_buffer[uart_rx_old_pos + i];
+                    osMessageQueuePut(DcMuartRxQueueHandle, &rxByte, 0U, 0U); // ISR-Safe Call
                 }
             }
             else
@@ -674,11 +707,13 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
                 uint16_t tailLen = UART_RX_BUFFER_SIZE - uart_rx_old_pos;
                 for (uint16_t i = 0U; i < tailLen; i++)
                 {
-                    Dcm_FeedRxByte(uart_rx_buffer[uart_rx_old_pos + i]);
+                    uint8_t rxByte = uart_rx_buffer[uart_rx_old_pos + i];
+                    osMessageQueuePut(DcMuartRxQueueHandle, &rxByte, 0U, 0U); // ISR-Safe Call 
                 }
                 for (uint16_t i = 0U; i < Size; i++)
                 {
-                    Dcm_FeedRxByte(uart_rx_buffer[i]);
+                    uint8_t rxByte = uart_rx_buffer[i];
+                    osMessageQueuePut(DcMuartRxQueueHandle, &rxByte, 0U, 0U); // ISR-Safe Call 
                 }
             }
 
@@ -930,6 +965,30 @@ void task100msHandleFunction(void *argument)
     osDelay(100);
   }
   /* USER CODE END task100msHandleFunction */
+}
+
+/* USER CODE BEGIN Header_DiagnosticTask_Function */
+/**
+* @brief Function implementing the DiagnosticTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_DiagnosticTask_Function */
+void DiagnosticTask_Function(void *argument)
+{
+  /* USER CODE BEGIN DiagnosticTask_Function */
+  uint8_t rxByte;
+  /* Infinite loop */
+  for(;;)
+    {
+      /* If there are not data in queue , cpu sleep, zero cpu load */
+      if (osMessageQueueGet(DcMuartRxQueueHandle, &rxByte, NULL, osWaitForever) == osOK)
+      {
+        /* Delete CRLF from Received Bytes */
+          Dcm_FeedRxByte(rxByte);
+        }
+    }
+  /* USER CODE END DiagnosticTask_Function */
 }
 
 /**

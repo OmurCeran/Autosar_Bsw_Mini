@@ -158,7 +158,7 @@ static void Dcm_SendResponse(const uint8 *response, uint8 length)
 
     txAscii[txLen++] = '\r';
     txAscii[txLen++] = '\n';
-
+    txAscii[txLen++] = '\0';
     /* Log structured message first (via normal logging) */
     if (response[0] == (UDS_NRC_SID))
     {
