@@ -12,6 +12,28 @@
 
 #include "Mini_Dem.h"
 #include "Mini_SchM.h"
+#include "Mini_Timestamp.h"
+#include "Mini_NvM.h"
+
+/* ============================================================
+ * DEM Event Names & DTC Codes
+ *
+ * In real AUTOSAR: configured in DaVinci per event.
+ * Typical ASIL-D config: 5 consecutive fails to confirm, 5 passes to heal.
+ * ============================================================ */
+static const char* const dem_eventNames[DEM_EVENT_COUNT] = {
+    [DEM_EVENT_TORQUE_SENSOR_FAULT] = "TORQUE_SENSOR_FAULT",
+    [DEM_EVENT_VEHICLE_SPEED_FAULT] = "VEHICLE_SPEED_FAULT",
+    [DEM_EVENT_MOTOR_OVERCURRENT]   = "MOTOR_OVERCURRENT",
+    [DEM_EVENT_COMMUNICATION_LOSS]  = "COMMUNICATION_LOSS"
+};
+
+static uint16 dem_eventDtcCodes[DEM_EVENT_COUNT] = {
+    [DEM_EVENT_TORQUE_SENSOR_FAULT] = 0x4A12U,  /* ISO 15031-6 DTC code */
+    [DEM_EVENT_VEHICLE_SPEED_FAULT] = 0x4A13U,
+    [DEM_EVENT_MOTOR_OVERCURRENT]   = 0x4A14U,
+    [DEM_EVENT_COMMUNICATION_LOSS]  = 0x4A15U
+};
 
 /* ============================================================
  * DEBOUNCE CONFIGURATION
@@ -127,6 +149,20 @@ void Dem_Init(void)
  * In real AUTOSAR: SWC calls Rte_Call_Event_SetEventStatus()
  * which routes to Dem_SetEventStatus() via Client-Server port.
  */
+/* Replace your modified Dem_SetEventStatus body with this version.
+ * The KEY DIFFERENCE: we only log when the debounce counter actually
+ * changes. Previously we logged on every PREFAILED/PREPASSED report,
+ * which was 10 Hz x 2 events = 20 log lines per second — enough to
+ * overflow the DMA UART buffer and cause a crash.
+ *
+ * Now:
+ * - PREFAILED with counter already at threshold → NO LOG (already maxed)
+ * - PREFAILED causing counter to step up → LOG (genuine state change)
+ * - PREPASSED with counter already at threshold_passed → NO LOG
+ * - PREPASSED causing counter to step down → LOG
+ * - Transitions (FAILED / HEALED) → LOG (critical events)
+ */
+
 Std_ReturnType Dem_SetEventStatus(Dem_EventIdType eventId, Dem_EventStatusType status)
 {
     if (eventId >= DEM_EVENT_COUNT)
@@ -173,6 +209,9 @@ Std_ReturnType Dem_SetEventStatus(Dem_EventIdType eventId, Dem_EventStatusType s
             return E_NOT_OK;
     }
 
+    /* Save whether counter changed — for logging decision */
+    boolean counterChanged = (oldCounter != evt->debounceCounter);
+
     /* Check for state transitions */
     boolean transitionToFailed = (oldCounter < cfg->threshold_failed) &&
                                   (evt->debounceCounter >= cfg->threshold_failed);
@@ -181,17 +220,64 @@ Std_ReturnType Dem_SetEventStatus(Dem_EventIdType eventId, Dem_EventStatusType s
 
     SchM_Exit_ExclusiveArea();
 
-    /* Handle transitions (outside exclusive area — these can be long operations) */
+    /* ============================================================
+     * LOGGING — only when something meaningful changed
+     * ============================================================ */
+
+    /* Log counter progression ONLY when the counter actually moved
+     * AND it's currently moving (not stuck at threshold).
+     * This gives us 5 lines during fault injection (1/5 through 5/5)
+     * and 5 lines during healing, instead of continuous spam. */
+    if (counterChanged && !transitionToFailed && !transitionToPassed)
+    {
+        if (status == DEM_EVENT_STATUS_PREFAILED)
+        {
+            Log_Write(LOG_TAG_DEM, "Event %s: PREFAILED, debounce=%d/%d",
+                      dem_eventNames[eventId],
+                      (int)evt->debounceCounter,
+                      (int)cfg->threshold_failed);
+        }
+        else if (status == DEM_EVENT_STATUS_PREPASSED)
+        {
+            Log_Write(LOG_TAG_DEM, "Event %s: PREPASSED, debounce=%d/%d",
+                      dem_eventNames[eventId],
+                      (int)evt->debounceCounter,
+                      (int)cfg->threshold_passed);
+        }
+    }
+
+    /* Handle transitions (outside exclusive area) */
     if (transitionToFailed)
     {
         Dem_UpdateStatusOnFailed(eventId);
         Dem_CaptureFreezeFrame(eventId);
-        /* Mark for NvM write in next MainFunction */
         evt->isStored = FALSE;
+
+        Log_Raw("");
+        Log_Write(LOG_TAG_DEM, ">>> EVENT FAILED: %s (DTC 0x%04X) <<<",
+                  dem_eventNames[eventId], dem_eventDtcCodes[eventId]);
+        Log_Write(LOG_TAG_DEM, "DTC status byte: 0x%02X", evt->statusByte);
+        Log_Write(LOG_TAG_DEM, "  bit 0 (TF)     = %u  testFailed",
+                  (evt->statusByte & DEM_UDS_STATUS_TF)    ? 1U : 0U);
+        Log_Write(LOG_TAG_DEM, "  bit 1 (TFTOC)  = %u  testFailedThisOpCycle",
+                  (evt->statusByte & DEM_UDS_STATUS_TFTOC) ? 1U : 0U);
+        Log_Write(LOG_TAG_DEM, "  bit 2 (PDTC)   = %u  pendingDTC",
+                  (evt->statusByte & DEM_UDS_STATUS_PDTC)  ? 1U : 0U);
+        Log_Write(LOG_TAG_DEM, "  bit 3 (CDTC)   = %u  confirmedDTC",
+                  (evt->statusByte & DEM_UDS_STATUS_CDTC)  ? 1U : 0U);
+        Log_Write(LOG_TAG_DEM, "  bit 5 (TFSLC)  = %u  testFailedSinceLastClear",
+                  (evt->statusByte & DEM_UDS_STATUS_TFSLC) ? 1U : 0U);
+        Log_Write(LOG_TAG_DEM, "Freeze frame: torque=%u speed=%u t=%lums",
+                  (uint32)evt->freezeFrame.torque_input,
+                  (uint32)evt->freezeFrame.vehicle_speed,
+                  evt->freezeFrame.timestamp_ms);
+        Log_Raw("");
     }
     else if (transitionToPassed)
     {
         Dem_UpdateStatusOnPassed(eventId);
+        Log_Write(LOG_TAG_DEM, ">>> EVENT HEALED: %s (status now 0x%02X) <<<",
+                  dem_eventNames[eventId], evt->statusByte);
     }
 
     return E_OK;
@@ -279,10 +365,12 @@ void Dem_MainFunction(void)
 
         if (needStore)
         {
-            /* TODO: In real system: NvM_WriteBlock(blockId, &dem_eventData[eventId])
+            /* Trigger NvM write for this event's DTC data.
              * Here we just mark it as stored and count.
              * In real NvM, this call returns E_OK immediately (queued),
              * actual flash write happens in NvM MainFunction later. */
+            /* Real NvM write call */
+            NvM_WriteBlock(NVM_BLOCK_DEM_DTCS, &dem_eventData[eventId]);
             dem_eventData[eventId].isStored = TRUE;
             dem_totalNvmWrites++;
         }

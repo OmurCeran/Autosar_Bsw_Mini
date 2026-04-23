@@ -20,9 +20,17 @@
 #include "Mini_Rte.h"
 #include "Mini_Dem.h"
 #include "Mini_Com.h"
+#include "Mini_FaultInj.h"
 
 /* Race condition invariant — writer must preserve speed = torque * 10 */
 #define SPEED_TO_TORQUE_RATIO   (10.0f)
+
+/* Healing countdown — after fault clears, report PREPASSED N times
+ * to let DEM heal, then go silent */
+#define DIAG_HEAL_COUNT  (6U)   /* 6 x 100ms = 600ms, enough for debounce */
+ 
+static uint8 diag_healCounter_torque = 0U;
+static uint8 diag_healCounter_speed  = 0U;
 
 /* Reader/writer state */
 static uint32 sim_cycleCounter = 0U;
@@ -144,10 +152,53 @@ void App_Runnable_TorqueCalc_1ms(void)
  */
 void App_Runnable_DiagMonitor_100ms(void)
 {
+    /* Update freeze frame source — always, so DEM captures current state */
     const Rte_SteeringDataType *data = Rte_Debug_GetGlobalData();
-    (void)data;
-    /* Placeholder for plausibility checks */
+ 
+    float32 torque = FaultInj_GetCorruptedTorque(data->torque_input);
+    float32 speed  = FaultInj_GetCorruptedSpeed(data->vehicle_speed);
+ 
+    Dem_SetFreezeFrameData(
+        (uint16)(torque * 10.0f),
+        (uint16)(speed * 10.0f),
+        0U,
+        (uint16)(torque * 20.0f)
+    );
+ 
+    /* ============ TORQUE SENSOR MONITORING ============ */
+    FaultInj_TypeType activeFault = FaultInj_GetActive();
+    boolean torqueFaultActive = (activeFault == FAULT_INJ_TORQUE_OUT_OF_RANGE);
+ 
+    if (torqueFaultActive)
+    {
+        /* Fault is actively injected — report PREFAILED */
+        Dem_SetEventStatus(DEM_EVENT_TORQUE_SENSOR_FAULT, DEM_EVENT_STATUS_PREFAILED);
+        diag_healCounter_torque = DIAG_HEAL_COUNT;  /* arm healer for when fault clears */
+    }
+    else if (diag_healCounter_torque > 0U)
+    {
+        /* Fault recently cleared — heal the debounce counter a few times */
+        Dem_SetEventStatus(DEM_EVENT_TORQUE_SENSOR_FAULT, DEM_EVENT_STATUS_PREPASSED);
+        diag_healCounter_torque--;
+    }
+    /* else: no fault, no reporting — silent */
+ 
+    /* ============ VEHICLE SPEED MONITORING ============ */
+    boolean speedFaultActive = (activeFault == FAULT_INJ_SPEED_FROZEN);
+ 
+    if (speedFaultActive)
+    {
+        Dem_SetEventStatus(DEM_EVENT_VEHICLE_SPEED_FAULT, DEM_EVENT_STATUS_PREFAILED);
+        diag_healCounter_speed = DIAG_HEAL_COUNT;
+    }
+    else if (diag_healCounter_speed > 0U)
+    {
+        Dem_SetEventStatus(DEM_EVENT_VEHICLE_SPEED_FAULT, DEM_EVENT_STATUS_PREPASSED);
+        diag_healCounter_speed--;
+    }
+    /* else: silent */
 }
+ 
 
 uint32 App_GetRaceConditionDetections(void)
 {

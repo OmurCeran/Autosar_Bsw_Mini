@@ -6,6 +6,8 @@
 #include "Mini_SchM.h"
 #include "Mini_Com.h"
 #include "Mini_Dem.h"
+#include "Mini_Nvm.h"
+
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -81,4 +83,5 @@ void SchM_MainFunction_100ms(void)
 {
     Dem_MainFunction();
     /* NvM_MainFunction() would be called here in a full stack */
+    NvM_MainFunction();  
 }

@@ -49,7 +49,14 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_SchM.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_Dem.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_Com.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_Timestamp.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_Ecum.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_Nvm.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_FaultInj.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_Dcm.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/app/App_Swc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/app/freertos_Helper.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/app/Debug_Helper.c
 )
 
 # Add include paths
@@ -59,9 +66,15 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Inc/app
     ${CMAKE_CURRENT_SOURCE_DIR}/Inc/bsw/com/Mini_Com.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Inc/bsw/dem/Mini_Dem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/bsw/timestamp/Mini_Timestamp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Inc/bsw/schm/Mini_SchM.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Inc/bsw/rte/Mini_Rte.h
-
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/bsw/ecum/Mini_Ecum.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/bsw/nvm/Mini_Nvm.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/bsw/fault/Mini_FaultInj.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/bsw/dcm/Mini_Dcm.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/app/freertos_Helper.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/app/Debug_Helper.h
 )
 
 # Add project symbols (macros)

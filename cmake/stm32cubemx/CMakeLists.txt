@@ -15,6 +15,11 @@ set(MX_Include_Dirs
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc/bsw/dem
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc/bsw/rte
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc/bsw/schm
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc/bsw/timestamp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc/bsw/ecum
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc/bsw/nvm
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc/bsw/fault
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc/bsw/dcm
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc/app
     ${CMAKE_CURRENT_SOURCE_DIR}/../../USB_HOST/App
     ${CMAKE_CURRENT_SOURCE_DIR}/../../USB_HOST/Target

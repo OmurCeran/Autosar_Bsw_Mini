@@ -28,6 +28,12 @@
 #include "Mini_Com.h"
 #include "Mini_Dem.h"
 #include "Mini_Rte.h"
+#include "Mini_Timestamp.h"
+#include "Mini_Timestamp.h"
+#include "Mini_EcuM.h"
+#include "Mini_NvM.h"
+#include "Mini_Dcm.h"
+#include "Mini_FaultInj.h"
 #include "App_Swc.h"
 #include <stdio.h>
 #include <stdarg.h>
@@ -35,14 +41,25 @@
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
+typedef StaticTask_t osStaticThreadDef_t;
 /* USER CODE BEGIN PTD */
 
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define DEMO_PHASE_DURATION_MS   5000U
-#define DEMO_COOLDOWN_MS          500U
+#define DEMO_PHASE_DURATION_MS      5000U
+#define DEMO_COOLDOWN_MS            500U
+#define DEBUG_AUTOSAR               1U
+#define STACKSIZE_TASK_1MS          (512U * 4)
+#define STACKSIZE_TASK_10MS         (512U * 4)
+#define STACKSIZE_TASK_100MS        (512U * 4)
+#define STACKSIZE_DEFAULT_TASK      (2048U * 4)
+
+/* DMA RX buffer - circular buffer for incoming UDS frames */
+#define UART_RX_BUFFER_SIZE   64U
+static uint8_t uart_rx_buffer[UART_RX_BUFFER_SIZE];
+static volatile uint16_t uart_rx_old_pos = 0U;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -57,41 +74,83 @@ SPI_HandleTypeDef hspi1;
 
 UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart2_tx;
+DMA_HandleTypeDef hdma_usart2_rx;
 
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
+uint32_t defaultTaskBuffer[ 1024 ];
+osStaticThreadDef_t defaultTaskControlBlock;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
-  .stack_size = 512 * 4,
+  .cb_mem = &defaultTaskControlBlock,
+  .cb_size = sizeof(defaultTaskControlBlock),
+  .stack_mem = &defaultTaskBuffer[0],
+  .stack_size = sizeof(defaultTaskBuffer),
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* USER CODE BEGIN PV */
-/*Scheduling task for 1ms , 10ms ,100ms */
+/* Definitions for task1ms */
 osThreadId_t task1msHandle;
+uint32_t task1msStack[ 2048 ];
+osStaticThreadDef_t task1msControlBlock;
 const osThreadAttr_t task1ms_attributes = {
   .name = "task1ms",
-  .stack_size = 128 * 4,
+  .cb_mem = &task1msControlBlock,
+  .cb_size = sizeof(task1msControlBlock),
+  .stack_mem = &task1msStack[0],
+  .stack_size = sizeof(task1msStack),
   .priority = (osPriority_t) osPriorityHigh,
 };
-
+/* Definitions for task10ms */
 osThreadId_t task10msHandle;
+uint32_t task10msStack[ 2048 ];
+osStaticThreadDef_t task10msStackControlBlock;
 const osThreadAttr_t task10ms_attributes = {
   .name = "task10ms",
-  .stack_size = 128 * 4,
+  .cb_mem = &task10msStackControlBlock,
+  .cb_size = sizeof(task10msStackControlBlock),
+  .stack_mem = &task10msStack[0],
+  .stack_size = sizeof(task10msStack),
   .priority = (osPriority_t) osPriorityNormal,
 };
-
+/* Definitions for task100ms */
 osThreadId_t task100msHandle;
+uint32_t task100msStack[ 2048 ];
+osStaticThreadDef_t task100msControlBlock;
 const osThreadAttr_t task100ms_attributes = {
   .name = "task100ms",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityBelowNormal7,
+  .cb_mem = &task100msControlBlock,
+  .cb_size = sizeof(task100msControlBlock),
+  .stack_mem = &task100msStack[0],
+  .stack_size = sizeof(task100msStack),
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
+/* USER CODE BEGIN PV */
+
+/*Static semaphore and mutex usage*/
+/* Static control block buffers — no malloc needed */
+static StaticSemaphore_t printfMutexBuffer;
+static StaticSemaphore_t dmaTxSemBuffer;
+
+osMutexId_t printf_mutex;
+osSemaphoreId_t dma_tx_sem;
+
+/* Attributes with static buffer references */
+static const osMutexAttr_t printf_mutex_attr = {
+    .name    = "printfMutex",
+    .attr_bits = osMutexPrioInherit,       /* priority inheritance */
+    .cb_mem  = &printfMutexBuffer,
+    .cb_size = sizeof(printfMutexBuffer),
 };
 
-/* DMA Printf icin gerekli degiskenler */
+static const osSemaphoreAttr_t dma_tx_sem_attr = {
+    .name    = "dmaTxSem",
+    .cb_mem  = &dmaTxSemBuffer,
+    .cb_size = sizeof(dmaTxSemBuffer),
+};
+/*Safety-critical software doesn't use malloc. I migrated my mini AUTOSAR project from dynamic to static allocation, 
+* following ISO 26262 and MISRA-C:2012 Rule 21.3 guidance.*/
+/* DMA Printf buffer */
 uint8_t dma_tx_buffer[256];
-osSemaphoreId_t dma_tx_sem;
-osMutexId_t printf_mutex;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -102,24 +161,17 @@ static void MX_CAN1_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART2_UART_Init(void);
 void StartDefaultTask(void *argument);
-
-/* USER CODE BEGIN PFP */
 void task1msHandleFunction(void *argument);
 void task10msHandleFunction(void *argument);
 void task100msHandleFunction(void *argument);
+
+/* USER CODE BEGIN PFP */
 void DMA_Printf(const char *format, ...);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-  static void BSW_Init(void)
-  {
-      SchM_Init();
-      Rte_Init();
-      Com_Init();
-      Dem_Init();
-      App_Swc_Init();
-  }
+
 /* USER CODE END 0 */
 
 /**
@@ -155,26 +207,26 @@ int main(void)
   MX_SPI1_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  DMA_Printf("\r\n");
-  DMA_Printf("============================================\r\n");
-  DMA_Printf(" Autosar_Bsw_Mini - EPS Race Condition Demo\r\n");
-  DMA_Printf(" STM32F407 + FreeRTOS + DMA UART\r\n");
-  DMA_Printf("============================================\r\n");
-  DMA_Printf("\r\n");
-  DMA_Printf("[INIT] Initializing BSW modules...\r\n");
-  BSW_Init();
-  DMA_Printf("[INIT] BSW initialization completed\r\n");
+  
+  /* UART RX — DMA circular mode with IDLE line detection */
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart2, uart_rx_buffer, UART_RX_BUFFER_SIZE);
+  __HAL_DMA_DISABLE_IT(&hdma_usart2_rx, DMA_IT_HT);  /* Disable half-transfer IRQ (don't need it) */
+
+  /* Logging initialization is inside EcuM_StartupSequence */
+  EcuM_StartupSequence();
   /* USER CODE END 2 */
 
   /* Init scheduler */
   osKernelInitialize();
 
   /* USER CODE BEGIN RTOS_MUTEX */
-  printf_mutex = osMutexNew(NULL);
+  /*printf_mutex = osMutexNew(dmaMutex_attributes);*/
+  printf_mutex = osMutexNew(&printf_mutex_attr);
   /* USER CODE END RTOS_MUTEX */
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
-  dma_tx_sem = osSemaphoreNew(1, 1, NULL);
+  dma_tx_sem = osSemaphoreNew(1, 1, &dma_tx_sem_attr);
+  /*dma_tx_sem = osSemaphoreNew(1, 1, NULL);*/
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* USER CODE BEGIN RTOS_TIMERS */
@@ -186,18 +238,37 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of defaultTask (used as Demo task) */
+  /* creation of defaultTask */
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
-  /* USER CODE BEGIN RTOS_THREADS */
+  /* creation of task1ms */
   task1msHandle = osThreadNew(task1msHandleFunction, NULL, &task1ms_attributes);
 
+  /* creation of task10ms */
   task10msHandle = osThreadNew(task10msHandleFunction, NULL, &task10ms_attributes);
 
+  /* creation of task100ms */
   task100msHandle = osThreadNew(task100msHandleFunction, NULL, &task100ms_attributes);
 
-  DMA_Printf("[INIT] All tasks created, starting scheduler...\r\n");
-  DMA_Printf("\r\n");
+  /* USER CODE BEGIN RTOS_THREADS */
+
+    /* Check for all task creation , otherwise it might be silently fail */
+  if (defaultTaskHandle == NULL ||
+      task1msHandle     == NULL ||
+      task10msHandle    == NULL ||
+      task100msHandle   == NULL)
+  {
+      Log_Raw("\r\n!!! TASK CREATION FAILED !!!\r\n");
+      Log_Raw("defaultTask: %s\r\n", defaultTaskHandle ? "OK" : "FAIL");
+      Log_Raw("task1ms    : %s\r\n", task1msHandle     ? "OK" : "FAIL");
+      Log_Raw("task10ms   : %s\r\n", task10msHandle    ? "OK" : "FAIL");
+      Log_Raw("task100ms  : %s\r\n", task100msHandle   ? "OK" : "FAIL");
+      Error_Handler();
+  }
+      Log_Raw("[INIT] All tasks created (static allocation)\r\n");
+
+  Log_Raw("[INIT] All tasks created, starting scheduler...\r\n");
+  Log_Raw("\r\n");
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -383,6 +454,9 @@ static void MX_DMA_Init(void)
   __HAL_RCC_DMA1_CLK_ENABLE();
 
   /* DMA interrupt init */
+  /* DMA1_Stream5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
   /* DMA1_Stream6_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream6_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream6_IRQn);
@@ -516,7 +590,7 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 /**
-  * @brief Thread-safe ve DMA tabanli Printf fonksiyonu
+  * @brief Thread-safe ve DMA based printf implementation for debugging over UART2.
   */
 void DMA_Printf(const char *format, ...)
 {
@@ -525,11 +599,11 @@ void DMA_Printf(const char *format, ...)
 
     if (osKernelGetState() == osKernelRunning)
     {
-        /* RTOS calisiyorsa: Mutex ve Semaphore ile guvenli aktarim yap */
-        if (osMutexAcquire(printf_mutex, osWaitForever) == osOK)
+        /* RTOS = MUTEX and SEMAPHORE for thread safety */
+        if (osMutexAcquire(printf_mutex, pdMS_TO_TICKS(50)) == osOK)
         {
-            /* Bir onceki DMA transferinin bitmesini bekle */
-            if (osSemaphoreAcquire(dma_tx_sem, osWaitForever) == osOK)
+            /* Wait for DMA transfer to complete */
+            if (osSemaphoreAcquire(dma_tx_sem, pdMS_TO_TICKS(50)) == osOK)
             {
                 int len = vsnprintf((char*)dma_tx_buffer, sizeof(dma_tx_buffer), format, args);
                 if (len > 0)
@@ -538,7 +612,7 @@ void DMA_Printf(const char *format, ...)
                 }
                 else
                 {
-                    osSemaphoreRelease(dma_tx_sem); /* Hata varsa semaforu geri birak */
+                    osSemaphoreRelease(dma_tx_sem); /* If there is an error, release the semaphore */
                 }
             }
             osMutexRelease(printf_mutex);
@@ -546,7 +620,7 @@ void DMA_Printf(const char *format, ...)
     }
     else
     {
-        /* RTOS henuz baslamadiysa: Polling kullan */
+        /* If RTOS is not ready, use polling */
         int len = vsnprintf((char*)dma_tx_buffer, sizeof(dma_tx_buffer), format, args);
         if (len > 0)
         {
@@ -557,13 +631,83 @@ void DMA_Printf(const char *format, ...)
 }
 
 /**
-  * @brief UART DMA transferi tamamlandiginda tetiklenir.
+  * @brief UART DMA transfer completed callback - semaphore release for next transfer
   */
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART2)
     {
         osSemaphoreRelease(dma_tx_sem);
+    }
+}
+
+/**
+ * @brief UART RX event callback — called on IDLE line detection or DMA complete
+ *
+ * Called in three scenarios (HAL tells us which via the Size parameter):
+ *   - IDLE line: frame finished, Size = bytes received since last call
+ *   - HT/TC: DMA buffer half-full / full (circular wrap-around)
+ *
+ * We just forward new bytes to DCM frame assembler.
+ */
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+    if (huart->Instance == USART2)
+    {
+        /* Calculate how many new bytes arrived */
+        if (Size != uart_rx_old_pos)
+        {
+            uint16_t newDataLen;
+
+            if (Size > uart_rx_old_pos)
+            {
+                /* Linear growth — bytes are contiguous in the buffer */
+                newDataLen = Size - uart_rx_old_pos;
+                for (uint16_t i = 0U; i < newDataLen; i++)
+                {
+                    Dcm_FeedRxByte(uart_rx_buffer[uart_rx_old_pos + i]);
+                }
+            }
+            else
+            {
+                /* Buffer wrap-around — read to end, then from start */
+                uint16_t tailLen = UART_RX_BUFFER_SIZE - uart_rx_old_pos;
+                for (uint16_t i = 0U; i < tailLen; i++)
+                {
+                    Dcm_FeedRxByte(uart_rx_buffer[uart_rx_old_pos + i]);
+                }
+                for (uint16_t i = 0U; i < Size; i++)
+                {
+                    Dcm_FeedRxByte(uart_rx_buffer[i]);
+                }
+            }
+
+            uart_rx_old_pos = Size;
+
+            /* Handle buffer wrap */
+            if (uart_rx_old_pos >= UART_RX_BUFFER_SIZE)
+            {
+                uart_rx_old_pos = 0U;
+            }
+        }
+    }
+}
+
+/**
+ * @brief UART error callback — re-arm RX on error
+ */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART2)
+    {
+        /* Clear error flags */
+        __HAL_UART_CLEAR_FLAG(huart, UART_FLAG_ORE | UART_FLAG_FE | UART_FLAG_NE);
+
+        /* Re-arm RX */
+        HAL_UARTEx_ReceiveToIdle_DMA(huart, uart_rx_buffer, UART_RX_BUFFER_SIZE);
+        __HAL_DMA_DISABLE_IT(&hdma_usart2_rx, DMA_IT_HT);
+
+        uart_rx_old_pos = 0U;
     }
 }
 /* USER CODE END 4 */
@@ -583,31 +727,26 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 /* USER CODE END Header_StartDefaultTask */
 void StartDefaultTask(void *argument)
 {
-  (void)argument;
-
   /* init code for USB_HOST */
   MX_USB_HOST_Init();
-
   /* USER CODE BEGIN 5 */
   uint32_t cycle = 0U;
+  /* Notify EcuM that scheduler has started */
+  EcuM_OnSchedulerStart();
 
   /* Give the periodic tasks a moment to start running */
   osDelay(1000);
 
-  DMA_Printf("\r\n");
-  DMA_Printf("############################################\r\n");
-  DMA_Printf("#   RACE CONDITION DEMO : STARTING         #\r\n");
-  DMA_Printf("############################################\r\n");
-  DMA_Printf("\r\n");
+  Log_Banner("RACE CONDITION DEMO — STARTING");
 
   for (;;)
   {
     cycle++;
 
     /* ============ EXPLICIT MODE (dangerous) ============ */
-    DMA_Printf("--------------------------------------------\r\n");
-    DMA_Printf(" Cycle %lu : EXPLICIT mode (5s window)\r\n", cycle);
-    DMA_Printf("--------------------------------------------\r\n");
+    Log_Separator();
+    Log_Write("DEMO ", "Cycle %lu | Phase 1: EXPLICIT mode (5s window)", cycle);
+    Log_Separator();
 
     Rte_SetAccessMode(RTE_ACCESS_EXPLICIT);
     Rte_ResetInconsistencyCount();
@@ -615,20 +754,20 @@ void StartDefaultTask(void *argument)
     osDelay(DEMO_PHASE_DURATION_MS);
 
     uint32_t explicitErrors = Rte_GetInconsistencyCount();
-    DMA_Printf(" Detected inconsistencies : %lu\r\n", explicitErrors);
-    DMA_Printf(" Torque miscalculations   : %lu\r\n", explicitErrors);
+    Log_Write("DEMO ", "EXPLICIT: %lu inconsistencies detected", explicitErrors);
+
     if (explicitErrors > 0U)
     {
-      DMA_Printf(" Result                   : RACE CONDITION\r\n");
+      Log_Write("DEMO ", " Result                   : RACE CONDITION");
     }
-    DMA_Printf("\r\n");
+    Log_Raw("");
 
     osDelay(DEMO_COOLDOWN_MS);
 
     /* ============ IMPLICIT MODE (safe) ============ */
-    DMA_Printf("--------------------------------------------\r\n");
-    DMA_Printf(" Cycle %lu : IMPLICIT mode (5s window)\r\n", cycle);
-    DMA_Printf("--------------------------------------------\r\n");
+    Log_Separator();
+    Log_Write("DEMO ", "Cycle %lu | Phase 2: IMPLICIT mode (5s window)", cycle);
+    Log_Separator();
 
     Rte_SetAccessMode(RTE_ACCESS_IMPLICIT);
     Rte_ResetInconsistencyCount();
@@ -636,35 +775,105 @@ void StartDefaultTask(void *argument)
     osDelay(DEMO_PHASE_DURATION_MS);
 
     uint32_t implicitErrors = Rte_GetInconsistencyCount();
-    DMA_Printf(" Detected inconsistencies : %lu%s\r\n",
-               implicitErrors, (implicitErrors == 0U) ? "  [OK]" : "  [FAIL]");
-    DMA_Printf(" Torque miscalculations   : %lu%s\r\n",
+    Log_Write("DEMO ", "IMPLICIT: %lu inconsistencies detected", implicitErrors);
+    Log_Write("DEMO ", " Torque miscalculations   : %lu%s\r\n",
                implicitErrors, (implicitErrors == 0U) ? "  [OK]" : "  [FAIL]");
     if (implicitErrors == 0U)
     {
-      DMA_Printf(" Result                   : AUTOSAR RTE snapshot works\r\n");
+      Log_Write("DEMO ", " Result                   : AUTOSAR RTE snapshot works");
     }
-    DMA_Printf("\r\n");
+    Log_Raw("\r\n");
 
     /* Summary */
-    DMA_Printf("==> Cycle %lu summary: EXPLICIT=%lu, IMPLICIT=%lu\r\n",
+    Log_Write("DEMO ", "==> Cycle %lu summary: EXPLICIT=%lu, IMPLICIT=%lu\r\n",
                cycle, explicitErrors, implicitErrors);
-    DMA_Printf("\r\n");
+    Log_Raw("\r\n");
 
     osDelay(2000);
+
+    /* ============ DEM LIFECYCLE DEMO ============ */
+    Log_Banner("DEM LIFECYCLE DEMO — Fault Injection Scenario");
+    Log_Write("DEMO ", "Running ECU in normal state for 2 seconds...");
+    osDelay(2000);
+
+    Log_Separator();
+    Log_Write("DEMO ", "Step 1: Injecting torque sensor fault");
+    Log_Separator();
+    FaultInj_Inject(FAULT_INJ_TORQUE_OUT_OF_RANGE);
+
+    /* Wait for debounce to mature (5 counts x 100ms = 500ms minimum) */
+    osDelay(1000);
+
+    Log_Separator();
+    Log_Write("DEMO ", "Step 2: Observing NvM async write completion");
+    Log_Separator();
+    osDelay(500);  /* Wait for NvM write to finish (3x100ms) */
+
+    Log_Separator();
+    Log_Write("DEMO ", "Step 3: Reading DTC state via Dem_GetDtcStatusByte()");
+    Log_Separator();
+    uint8 dtcStatus = Dem_GetDtcStatusByte(DEM_EVENT_TORQUE_SENSOR_FAULT);
+    Log_Write("DEMO ", "DTC 0x4A12 status byte: 0x%02X (tester would read this via UDS 0x19)",
+              (uint32)dtcStatus);
+
+    Dem_FreezeFrameType ff;
+    if (Dem_GetFreezeFrame(DEM_EVENT_TORQUE_SENSOR_FAULT, &ff) == E_OK)
+    {
+        Log_Write("DEMO ", "Freeze frame: torque=%u speed=%u angle=%u t=%lums",
+                  (uint32)ff.torque_input, (uint32)ff.vehicle_speed,
+                  (uint32)ff.steering_angle, ff.timestamp_ms);
+    }
+
+    osDelay(2000);
+
+    Log_Separator();
+    Log_Write("DEMO ", "Step 4: Removing fault, observing healing");
+    Log_Separator();
+    FaultInj_Clear();
+
+    /* Wait for debounce to heal (5 counts x 100ms = 500ms minimum) */
+    osDelay(1000);
+
+    Log_Separator();
+    Log_Write("DEMO ", "Step 5: Clearing DTC (simulates UDS 0x14 ClearDTC)");
+    Log_Separator();
+    Dem_ClearDtc(DEM_EVENT_TORQUE_SENSOR_FAULT);
+    Log_Write("DEMO ", "DTC cleared, status now: 0x%02X",
+              (uint32)Dem_GetDtcStatusByte(DEM_EVENT_TORQUE_SENSOR_FAULT));
+
+    osDelay(3000);
+
+    Log_Banner("DEMO CYCLE COMPLETE");
+    Log_Raw("");
+    Log_Raw("System is now IDLE. Send UDS requests from the terminal.");
+    Log_Raw("");
+    Log_Raw("Example commands:");
+    Log_Raw("  10 03         - Diagnostic Session Control (Extended)");
+    Log_Raw("  22 F1 90      - Read VIN");
+    Log_Raw("  22 F1 91      - Read Hardware Version");
+    Log_Raw("  19 02 09      - Read DTCs");
+    Log_Raw("  14 FF FF FF   - Clear all DTCs");
+    Log_Raw("  3E 00         - Tester Present");
+    Log_Raw("");
+    Log_Raw("Demo will restart in 60 seconds...");
+    Log_Raw("");
+
+    osDelay(60000);   /* 60 saniye beklemek = UDS test için rahat süre */
   }
   /* USER CODE END 5 */
 }
 
+/* USER CODE BEGIN Header_task1msHandleFunction */
 /**
-  * @brief  Function implementing the task1ms thread.
-  * @param  argument: Not used
-  * @retval None
-  */
+* @brief Function implementing the task1ms thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_task1msHandleFunction */
 void task1msHandleFunction(void *argument)
 {
+  /* USER CODE BEGIN task1msHandleFunction */
   (void)argument;
-  /* USER CODE BEGIN task1ms */
   /* Infinite loop */
   for(;;)
   {
@@ -674,18 +883,20 @@ void task1msHandleFunction(void *argument)
     Rte_Task_End();
     osDelay(1);
   }
-  /* USER CODE END task1ms */
+  /* USER CODE END task1msHandleFunction */
 }
 
+/* USER CODE BEGIN Header_task10msHandleFunction */
 /**
-  * @brief  Function implementing the task10ms thread.
-  * @param  argument: Not used
-  * @retval None
-  */
+* @brief Function implementing the task10ms thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_task10msHandleFunction */
 void task10msHandleFunction(void *argument)
 {
+  /* USER CODE BEGIN task10msHandleFunction */
   (void)argument;
-  /* USER CODE BEGIN task10ms */
   /* Infinite loop */
   for(;;)
   {
@@ -695,18 +906,20 @@ void task10msHandleFunction(void *argument)
     Rte_Task_End();
     osDelay(10);
   }
-  /* USER CODE END task10ms */
+  /* USER CODE END task10msHandleFunction */
 }
 
+/* USER CODE BEGIN Header_task100msHandleFunction */
 /**
-  * @brief  Function implementing the task100ms thread.
-  * @param  argument: Not used
-  * @retval None
-  */
+* @brief Function implementing the task100ms thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_task100msHandleFunction */
 void task100msHandleFunction(void *argument)
 {
+  /* USER CODE BEGIN task100msHandleFunction */
   (void)argument;
-  /* USER CODE BEGIN task100ms */
   /* Infinite loop */
   for(;;)
   {
@@ -716,7 +929,7 @@ void task100msHandleFunction(void *argument)
     Rte_Task_End();
     osDelay(100);
   }
-  /* USER CODE END task100ms */
+  /* USER CODE END task100msHandleFunction */
 }
 
 /**
@@ -755,8 +968,7 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.
