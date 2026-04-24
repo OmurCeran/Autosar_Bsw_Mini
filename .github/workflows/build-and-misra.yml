@@ -76,15 +76,15 @@ jobs:
             -I Drivers/CMSIS/Device/ST/STM32F4xx/Include \
             -I Middlewares/Third_Party/FreeRTOS/Source/include \
             -I Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2 \
-            -I Core/Inc/bsw/com/Mini_Com.h \
-            -I Core/Inc/bsw/dcm/Mini_Dcm.h \
-            -I Core/Inc/bsw/com/Mini_Dem.h \
-            -I Core/Inc/bsw/com/Mini_EcuM.h \
-            -I Core/Inc/bsw/com/Mini_FaultInj.h \
-            -I Core/Inc/bsw/com/Mini_Nvm.h \
-            -I Core/Inc/bsw/com/Mini_Rte.h \
-            -I Core/Inc/bsw/com/Mini_SchM.h \
-            -I Core/Inc/bsw/com/Mini_Timestamp.h \
+            -I Core/Inc/bsw/com \
+            -I Core/Inc/bsw/dcm \
+            -I Core/Inc/bsw/dem \
+            -I Core/Inc/bsw/ecum \
+            -I Core/Inc/bsw/fault \
+            -I Core/Inc/bsw/nvm \
+            -I Core/Inc/bsw/rte \
+            -I Core/Inc/bsw/schm \
+            -I Core/Inc/bsw/timestamp \
             --output-file=misra_report.txt \
             Core/Src/Mini_*.c \
             Core/Src/App_Swc.c \
