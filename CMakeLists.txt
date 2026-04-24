@@ -50,7 +50,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_Dem.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_Com.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_Timestamp.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_Ecum.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_EcuM.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_Nvm.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_FaultInj.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_Dcm.c
