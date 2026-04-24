@@ -1,0 +1,117 @@
+name: Build and MISRA Check
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build Firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi cmake ninja-build
+
+      - name: Verify toolchain
+        run: |
+          arm-none-eabi-gcc --version
+          cmake --version
+
+      - name: Configure CMake
+        run: cmake --preset Debug || cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/gcc-arm-none-eabi.cmake
+
+      - name: Build
+        run: cmake --build build/Debug --parallel || cmake --build build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-binary
+          path: |
+            build/**/*.elf
+            build/**/*.bin
+            build/**/*.hex
+          if-no-files-found: warn
+
+  misra-check:
+    name: MISRA C:2012 Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck python3
+
+      - name: Verify cppcheck version
+        run: cppcheck --version
+
+      - name: Download MISRA addon
+        run: |
+          # cppcheck already includes the misra addon
+          find / -name "misra.py" 2>/dev/null | head -n 5
+
+      - name: Run MISRA check on Core/Src
+        run: |
+          cppcheck \
+            --enable=all \
+            --addon=misra \
+            --suppress=missingIncludeSystem \
+            --suppress=unusedFunction \
+            --inline-suppr \
+            --std=c11 \
+            --platform=unix32 \
+            -I Core/Inc \
+            -I Drivers/STM32F4xx_HAL_Driver/Inc \
+            -I Drivers/CMSIS/Include \
+            -I Drivers/CMSIS/Device/ST/STM32F4xx/Include \
+            -I Middlewares/Third_Party/FreeRTOS/Source/include \
+            -I Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2 \
+            --output-file=misra_report.txt \
+            Core/Src/Mini_*.c \
+            Core/Src/App_Swc.c || true
+
+      - name: Display MISRA report summary
+        run: |
+          echo "============================================"
+          echo "  MISRA C:2012 Compliance Report Summary"
+          echo "============================================"
+          if [ -f misra_report.txt ]; then
+            # Count violations by severity
+            echo ""
+            echo "Total violations: $(wc -l < misra_report.txt)"
+            echo ""
+            echo "Violations by rule:"
+            grep -oE 'misra-c2012-[0-9]+\.[0-9]+' misra_report.txt | sort | uniq -c | sort -rn | head -20
+            echo ""
+            echo "First 30 violations:"
+            head -n 30 misra_report.txt
+          else
+            echo "No report generated"
+          fi
+
+      - name: Upload MISRA report
+        uses: actions/upload-artifact@v4
+        with:
+          name: misra-report
+          path: misra_report.txt
+          if-no-files-found: warn
+
+      - name: Check for critical violations
+        run: |
+          # Fail the build if there are critical MISRA violations (Mandatory or Required)
+          # For now, we just report but don't fail. Enable the exit 1 line when you're ready.
+          if [ -f misra_report.txt ]; then
+            CRITICAL_COUNT=$(grep -c "Required\|Mandatory" misra_report.txt 2>/dev/null || echo "0")
+            echo "Critical (Required/Mandatory) violations: $CRITICAL_COUNT"
+            # exit 1 if [ "$CRITICAL_COUNT" -gt 0 ]
+          fi
