@@ -13,6 +13,7 @@
 
 #include "Mini_Com.h"
 #include "Mini_SchM.h"
+#include <string.h>
 
 /* ============================================================
  * SIGNAL CONFIGURATION TABLE
@@ -63,18 +64,19 @@ static uint32 com_txCounter = 0U;
 static void Com_PackSignal_u16(uint8 *pduData, uint8 startBit, uint16 value, boolean bigEndian)
 {
     uint8 byteOffset = startBit / 8U;
+    uint8 nextByteOffset = (uint8)(byteOffset + 1U);
 
-    if (bigEndian)
+    if (TRUE == bigEndian)
     {
         /* Motorola: MSB first */
-        pduData[byteOffset]     = (uint8)((value >> 8U) & 0xFFU);
-        pduData[byteOffset + 1] = (uint8)(value & 0xFFU);
+        pduData[byteOffset]        = (uint8)((value >> 8U) & 0xFFU);
+        pduData[nextByteOffset]    = (uint8)(value & 0xFFU);
     }
     else
     {
         /* Intel: LSB first */
-        pduData[byteOffset]     = (uint8)(value & 0xFFU);
-        pduData[byteOffset + 1] = (uint8)((value >> 8U) & 0xFFU);
+        pduData[byteOffset]        = (uint8)(value & 0xFFU);
+        pduData[nextByteOffset]    = (uint8)((value >> 8U) & 0xFFU);
     }
 }
 
@@ -84,15 +86,16 @@ static void Com_PackSignal_u16(uint8 *pduData, uint8 startBit, uint16 value, boo
 static uint16 Com_UnpackSignal_u16(const uint8 *pduData, uint8 startBit, boolean bigEndian)
 {
     uint8 byteOffset = startBit / 8U;
+    uint8 nextByteOffset = (uint8)(byteOffset + 1U);
     uint16 value;
 
-    if (bigEndian)
+    if (TRUE == bigEndian)
     {
-        value = ((uint16)pduData[byteOffset] << 8U) | (uint16)pduData[byteOffset + 1];
+        value = ((uint16)pduData[byteOffset] << 8U) | (uint16)pduData[nextByteOffset];
     }
     else
     {
-        value = ((uint16)pduData[byteOffset + 1] << 8U) | (uint16)pduData[byteOffset];
+        value = ((uint16)pduData[nextByteOffset] << 8U) | (uint16)pduData[byteOffset];
     }
 
     return value;
@@ -104,7 +107,8 @@ static uint16 Com_UnpackSignal_u16(const uint8 *pduData, uint8 startBit, boolean
 
 void Com_Init(void)
 {
-    uint8 i, j;
+    uint8 i;
+    uint8 j;
 
     for (i = 0U; i < COM_PDU_COUNT; i++)
     {
@@ -126,13 +130,16 @@ void Com_Init(void)
  */
 Std_ReturnType Com_SendSignal(Com_SignalIdType signalId, const void *signalDataPtr)
 {
-    if (signalId >= COM_SIG_COUNT || signalDataPtr == NULL_PTR)
+    if ((signalId >= COM_SIG_COUNT) || (signalDataPtr == NULL_PTR))
     {
         return E_NOT_OK;
     }
 
     const Com_SignalConfigType *cfg = &com_signalConfig[signalId];
-    uint16 value = *((const uint16 *)signalDataPtr);
+    uint16 value;
+    
+    /* Use memcpy for safer pointer conversion (MISRA 11.5 compliant) */
+    (void)memcpy(&value, signalDataPtr, sizeof(uint16));
 
     /* Packing modifies shared PDU buffer — protect with exclusive area.
      * Keep the critical section SHORT — just the pack operation. */
@@ -150,7 +157,7 @@ Std_ReturnType Com_SendSignal(Com_SignalIdType signalId, const void *signalDataP
  */
 Std_ReturnType Com_ReceiveSignal(Com_SignalIdType signalId, void *signalDataPtr)
 {
-    if (signalId >= COM_SIG_COUNT || signalDataPtr == NULL_PTR)
+    if ((signalId >= COM_SIG_COUNT) || (signalDataPtr == NULL_PTR))
     {
         return E_NOT_OK;
     }
@@ -163,7 +170,8 @@ Std_ReturnType Com_ReceiveSignal(Com_SignalIdType signalId, void *signalDataPtr)
                                  cfg->startBit, cfg->isBigEndian);
     SchM_Exit_ExclusiveArea();
 
-    *((uint16 *)signalDataPtr) = value;
+    /* Use memcpy for safer pointer conversion (MISRA 11.5 compliant) */
+    (void)memcpy(signalDataPtr, &value, sizeof(uint16));
     return E_OK;
 }
 
@@ -192,7 +200,7 @@ void Com_MainFunctionTx(void)
         com_pduBuffer[pduId].updated = FALSE;
         SchM_Exit_ExclusiveArea();
 
-        if (needTx)
+        if (TRUE == needTx)
         {
             /* TODO: In real system, call CanIf_Transmit(pduId, pduInfo)
              * Here we simulate by incrementing a counter.
@@ -210,13 +218,14 @@ void Com_MainFunctionTx(void)
  */
 void Com_RxIndication(Com_PduIdType pduId, const uint8 *data, uint8 length)
 {
-    if (pduId >= COM_PDU_COUNT || data == NULL_PTR || length > COM_PDU_MAX_LENGTH)
+    uint8 i;
+    
+    if ((pduId >= COM_PDU_COUNT) || (data == NULL_PTR) || (length > COM_PDU_MAX_LENGTH))
     {
         return;
     }
 
     SchM_Enter_ExclusiveArea();
-    uint8 i;
     for (i = 0U; i < length; i++)
     {
         com_pduBuffer[pduId].data[i] = data[i];
