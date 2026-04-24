@@ -3,7 +3,7 @@
  * @brief   Mini NvM Implementation — Async flash simulation
  */
 
-#include "Mini_NvM.h"
+#include "Mini_Nvm.h"
 #include "Mini_Timestamp.h"
 #include "Mini_SchM.h"
 #include <string.h>

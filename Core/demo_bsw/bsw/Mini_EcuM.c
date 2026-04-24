@@ -9,7 +9,7 @@
 #include "Mini_Rte.h"
 #include "Mini_Com.h"
 #include "Mini_Dem.h"
-#include "Mini_NvM.h"
+#include "Mini_Nvm.h"
 #include "Mini_FaultInj.h"
 #include "App_Swc.h"
 

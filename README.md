@@ -85,7 +85,7 @@ Autosar_Bsw_Mini/
 │   │   ├── main.h, Std_Types.h
 │   │   ├── App_Swc.h
 │   │   ├── Mini_EcuM.h, Mini_SchM.h, Mini_Rte.h
-│   │   ├── Mini_Com.h, Mini_Dem.h, Mini_NvM.h, Mini_Dcm.h
+│   │   ├── Mini_Com.h, Mini_Dem.h, Mini_Nvm.h, Mini_Dcm.h
 │   │   ├── Mini_Timestamp.h, Mini_FaultInj.h
 │   │   └── FreeRTOSConfig.h
 │   └── Src/                 ← main.c + Mini_* BSW sources + App_Swc.c

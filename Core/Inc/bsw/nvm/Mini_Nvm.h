@@ -1,5 +1,5 @@
 /**
- * @file    Mini_NvM.h
+ * @file    Mini_Nvm.h
  * @brief   Mini Non-Volatile Memory Manager
  *
  * Maps to real AUTOSAR: NvM + MemIf + Fee + Fls chain (simplified)

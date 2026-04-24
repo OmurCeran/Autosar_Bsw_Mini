@@ -5,7 +5,7 @@
 
 #include "Mini_Dcm.h"
 #include "Mini_Dem.h"
-#include "Mini_NvM.h"
+#include "Mini_Nvm.h"
 #include "Mini_Timestamp.h"
 #include "Mini_SchM.h"
 #include "main.h"
