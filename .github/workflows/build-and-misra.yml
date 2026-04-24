@@ -78,7 +78,9 @@ jobs:
             -I Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2 \
             --output-file=misra_report.txt \
             Core/Src/Mini_*.c \
-            Core/Src/App_Swc.c || true
+            Core/Src/App_Swc.c \
+            Core/demo_bsw/bsw/*.c \
+            Core/Src/main.c
 
       - name: Display MISRA report summary
         run: |
