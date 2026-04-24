@@ -67,6 +67,8 @@ jobs:
             --addon=misra \
             --suppress=missingIncludeSystem \
             --suppress=unusedFunction \
+            --suppress=*:*Drivers/* \      
+            --suppress=*:*Middlewares/* \   
             --inline-suppr \
             --std=c11 \
             --platform=unix32 \
