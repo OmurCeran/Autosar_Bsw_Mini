@@ -55,6 +55,12 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_FaultInj.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/demo_bsw/bsw/Mini_Dcm.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/app/App_Swc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Segger_Lib/Src/SEGGER_SYSVIEW.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Segger_Lib/Src/SEGGER_SYSVIEW_FreeRTOS.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Segger_Lib/Src/SEGGER_SYSVIEW_Config_FreeRTOS.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Segger_Lib/Src/SEGGER_RTT.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Segger_Lib/Src/SEGGER_RTT_printf.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Segger_Lib/Src/SEGGER_RTT_ASM_ARMv7M.S
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/app/freertos_Helper.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/app/Debug_Helper.c
 )
@@ -73,6 +79,15 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Inc/bsw/nvm/Mini_Nvm.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Inc/bsw/fault/Mini_FaultInj.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Inc/bsw/dcm/Mini_Dcm.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/Segger_Lib/Inc/Global.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/Segger_Lib/Inc/SEGGER.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/Segger_Lib/Inc/SEGGER_SYSVIEW.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/Segger_Lib/Inc/SEGGER_SYSVIEW_Conf.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/Segger_Lib/Inc/SEGGER_SYSVIEW_ConfDefaults.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/Segger_Lib/Inc/SEGGER_SYSVIEW_FreeRTOS.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/Segger_Lib/Inc/SEGGER_SYSVIEW_Int.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/Segger_Lib/Inc/SEGGER_RTT.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Inc/Segger_Lib/Inc/SEGGER_RTT_Conf.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Inc/app/freertos_Helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Inc/app/Debug_Helper.h
 )

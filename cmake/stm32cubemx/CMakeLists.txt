@@ -21,6 +21,7 @@ set(MX_Include_Dirs
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc/bsw/fault
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc/bsw/dcm
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc/app
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Inc/Segger_LibH/Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/../../USB_HOST/App
     ${CMAKE_CURRENT_SOURCE_DIR}/../../USB_HOST/Target
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F4xx_HAL_Driver/Inc
@@ -86,7 +87,7 @@ set(FreeRTOS_Src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Middlewares/Third_Party/FreeRTOS/Source/tasks.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Middlewares/Third_Party/FreeRTOS/Source/timers.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_4.c
+#    ${CMAKE_CURRENT_SOURCE_DIR}/../../Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_4.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F/port.c
 )
 set(USB_Host_Library_Src

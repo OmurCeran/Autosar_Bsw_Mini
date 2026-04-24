@@ -34,6 +34,7 @@
 #include "Mini_NvM.h"
 #include "Mini_Dcm.h"
 #include "Mini_FaultInj.h"
+#include "SEGGER_SYSVIEW.h"
 #include "App_Swc.h"
 #include <stdio.h>
 #include <stdarg.h>
@@ -238,7 +239,7 @@ int main(void)
   __HAL_DMA_DISABLE_IT(&hdma_usart2_rx, DMA_IT_HT);  /* Disable half-transfer IRQ (don't need it) */
 
   /* Logging initialization is inside EcuM_StartupSequence */
-  EcuM_StartupSequence();
+    EcuM_StartupSequence();
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -305,6 +306,10 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_EVENTS */
   /* add events, ... */
+    /*SystemView configuration and startup*/
+    #ifdef DEBUG_SEGGER_SYSVIEW
+    SEGGER_SYSVIEW_Conf();
+    #endif
   /* USER CODE END RTOS_EVENTS */
 
   /* Start scheduler */
@@ -314,6 +319,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
   while (1)
   {
     /* USER CODE END WHILE */
@@ -765,10 +771,14 @@ void StartDefaultTask(void *argument)
   /* init code for USB_HOST */
   MX_USB_HOST_Init();
   /* USER CODE BEGIN 5 */
+  #ifdef DEBUG_SEGGER_SYSVIEW
+  SEGGER_SYSVIEW_Start();
+  #endif
   uint32_t cycle = 0U;
   /* Notify EcuM that scheduler has started */
   EcuM_OnSchedulerStart();
 
+  
   /* Give the periodic tasks a moment to start running */
   osDelay(1000);
 

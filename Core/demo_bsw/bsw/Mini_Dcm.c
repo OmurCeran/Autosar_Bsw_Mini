@@ -172,9 +172,11 @@ static void Dcm_SendResponse(const uint8 *response, uint8 length)
                   response[0] - UDS_POSITIVE_RESPONSE_MASK, (uint32)length);
         dcm_totalResponses++;
     }
-
+    /*Raw bytes*/
+    Log_Raw(txAscii);
+    //DMA_Printf("%s", txAscii);
     /* Then send the raw bytes */
-    HAL_UART_Transmit(&huart2, (uint8_t*)txAscii, txLen, HAL_MAX_DELAY);
+    //HAL_UART_Transmit(&huart2, (uint8_t*)txAscii, txLen, HAL_MAX_DELAY);
 }
 
 static void Dcm_SendNegativeResponse(uint8 sid, uint8 nrc)
