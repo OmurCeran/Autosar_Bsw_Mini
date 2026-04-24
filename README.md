@@ -1,5 +1,13 @@
 # Autosar_Bsw_Mini
 
+[![Build & MISRA Check](https://github.com/OmurCeran/Autosar_Bsw_Mini/actions/workflows/build-and-misra.yml/badge.svg)](https://github.com/OmurCeran/Autosar_Bsw_Mini/actions)
+![MISRA C:2012](https://img.shields.io/badge/MISRA--C%3A2012-cppcheck%20verified-blue)
+![Static Allocation](https://img.shields.io/badge/memory-static%20only-brightgreen)
+![AUTOSAR](https://img.shields.io/badge/AUTOSAR-Classic%204.x-orange)
+![Platform](https://img.shields.io/badge/platform-STM32F407-informational)
+![RTOS](https://img.shields.io/badge/RTOS-FreeRTOS%20%7C%20CMSIS--RTOS%20v2-yellow)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 A minimal, educational implementation of AUTOSAR Classic BSW concepts on STM32F407 Discovery with FreeRTOS — featuring a working UDS diagnostic interface, static memory allocation, RTOS-aware trace profiling, and a live ECU fault injection scenario.
 
 This project demonstrates the **mechanisms** behind AUTOSAR Basic Software — not a production stack. It recreates real ECU behavior end-to-end: startup sequence, normal operation, fault detection, DTC storage, diagnostic tester session, and recovery.
@@ -79,13 +87,14 @@ Full request-response cycle over UART (simulates ISO-TP over CAN):
 
 ```
 Autosar_Bsw_Mini/
+├── .github/workflows/       ← CI/CD: build + MISRA check on every push
 ├── .vscode/                 ← VS Code + Cortex-Debug launch config
 ├── Core/
 │   ├── Inc/                 ← STM32CubeMX-generated + BSW headers
 │   │   ├── main.h, Std_Types.h
 │   │   ├── App_Swc.h
 │   │   ├── Mini_EcuM.h, Mini_SchM.h, Mini_Rte.h
-│   │   ├── Mini_Com.h, Mini_Dem.h, Mini_Nvm.h, Mini_Dcm.h
+│   │   ├── Mini_Com.h, Mini_Dem.h, Mini_NvM.h, Mini_Dcm.h
 │   │   ├── Mini_Timestamp.h, Mini_FaultInj.h
 │   │   └── FreeRTOSConfig.h
 │   └── Src/                 ← main.c + Mini_* BSW sources + App_Swc.c
@@ -100,6 +109,21 @@ Autosar_Bsw_Mini/
 ├── README.md                ← You are here
 └── ARCHITECTURE.md          ← Deep design rationale
 ```
+
+---
+
+## Continuous Integration
+
+Every push to `main` triggers a GitHub Actions workflow that performs:
+
+1. **Firmware build** — ARM toolchain + CMake + Ninja, produces `.elf` / `.bin` / `.hex` artifacts
+2. **MISRA C:2012 static analysis** — `cppcheck` with the MISRA addon scans all BSW sources, reports violations by rule
+
+The build status badge at the top of this README reflects the latest commit. Workflow file: [`.github/workflows/build-and-misra.yml`](.github/workflows/build-and-misra.yml).
+
+**Current MISRA status:** The repository has a small number of acknowledged deviations (documented in the CI output). These are typical for embedded code that interacts with hardware registers — for example, `Rule 11.4` (integer-to-pointer cast) is unavoidable when accessing Cortex-M4 fault status registers at fixed addresses such as `0xE000ED28`. In a production automotive codebase these deviations would be justified in a Deviation Permit document.
+
+**Build artifacts** (the compiled firmware) are available for download from the Actions tab after each successful run.
 
 ---
 
@@ -332,7 +356,7 @@ Set a breakpoint in `Mini_Rte.c` on `rte_inconsistencyCount++`. In explicit mode
 | `App_Swc`       | SWC + Runnables      | Application mapped to periodic tasks         |
 | USART2 RX (DMA) | CAN driver + CanIf Rx| Frame reception with IDLE detection          |
 | USART2 TX (DMA) | CAN driver + CanIf Tx| Non-blocking bus output                      |
-| DiagnosticTask  | DCM RX path           | Dedicated UDS frame consumer from queue      |
+| DiagnosticTask  | DCM RX path          | Dedicated UDS frame consumer from queue      |
 
 ---
 
