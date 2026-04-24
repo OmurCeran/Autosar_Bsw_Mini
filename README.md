@@ -191,21 +191,24 @@ This mirrors how AUTOSAR OS generators produce code: every task, every stack, ev
 ---
 
 ## RTOS-Aware Profiling with SEGGER SystemView
-
+ 
 SEGGER SystemView is integrated for runtime task profiling. The Discovery board's ST-Link was reflashed to J-Link OB firmware, enabling RTT-based trace capture with a J-Link EDU.
-
+ 
+![SystemView Task Timeline and CPU Load](Segger_SystemView.png)
+ 
+*Live task scheduling timeline captured via SystemView. The bottom panel shows per-task CPU load measured over a 3.5-second window: task1ms = 1.79%, task10ms = 60.57%, task100ms = 0.02%, DiagnosticTask = 0.01%, Idle = 37.51%.*
+ 
 **What it reveals:**
 - Task scheduling timeline — which task runs, when, and for how long
-- CPU load per task (in the screenshot below: task1ms = 1.8%, task10ms = 60.6%, task100ms = 0.02%, Idle = 37.5%)
+- CPU load per task (shown in the Context panel above)
 - Context switch latency
 - Interrupt handler timing
 - API calls (semaphore acquire/release, queue put/get)
-
 **Why task10ms shows ~60% CPU load:**
 The 10ms task contains a deliberate ~1ms NOP delay implementing a **preemption window** for the race condition demo. In a real ECU this gap would be filled by an ADC conversion (10-50µs) or an I²C transfer (100-500µs). The demo amplifies it so the race is reliably reproducible — without this window the Cortex-M4 would finish the struct write between 1ms task ticks and the bug would hide. This is documented in `App_Swc.c`.
-
+ 
 Outside this deliberate delay, actual task CPU usage is in line with expectations: task1ms at ~1.8% and task100ms at ~0.02% CPU load.
-
+ 
 This profiling capability matches what Trace32 provides for production ECUs — the mental model is identical, only the tooling differs.
 
 ---
