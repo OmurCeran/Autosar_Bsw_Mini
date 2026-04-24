@@ -31,7 +31,7 @@
 #include "Mini_Timestamp.h"
 #include "Mini_Timestamp.h"
 #include "Mini_EcuM.h"
-#include "Mini_NvM.h"
+#include "Mini_Nvm.h"
 #include "Mini_Dcm.h"
 #include "Mini_FaultInj.h"
 #include "SEGGER_SYSVIEW.h"
