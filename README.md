@@ -47,6 +47,7 @@ Full request-response cycle over UART (simulates ISO-TP over CAN):
 ## Architecture Overview
 
 ```
+![Architecture Diagram](architecture_diagram.png)
 ┌──────────────────────────────────────────────────┐
 │  Application Layer (SWC Simulation)              │
 │  - Torque calculation        (1ms task)          │
